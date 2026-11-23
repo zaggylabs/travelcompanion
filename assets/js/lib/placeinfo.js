@@ -32,7 +32,8 @@ export function prettyHours(value) {
     .replace(/,(?=\S)/g, ", ")
     .replace(/\b(off|closed)\b/gi, "closed")
     .replace(/"([^"]*)"/g, "($1)")
-    .replace(/^24\/7\b/, "Every day, 24 hours"));
+    .replace(/^24\/7\b/, "Every day, 24 hours")
+    .replace(/^Mon–Sun\b/, "Every day"));
 }
 
 /** "W1282875870" -> { type: "way", id: 1282875870 } */

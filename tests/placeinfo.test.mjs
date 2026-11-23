@@ -7,6 +7,7 @@ import { rankPlaces } from "../assets/js/lib/places.js";
 test("prettyHours makes OSM opening_hours readable", () => {
   assert.deepEqual(prettyHours("Mo-Fr 09:00-17:00; Sa,Su 10:00-18:00; PH off"),
     ["Mon–Fri 09:00–17:00", "Sat, Sun 10:00–18:00", "Public holidays closed"]);
+  assert.deepEqual(prettyHours("Mo-Su 06:00-17:00"), ["Every day 06:00–17:00"]);
   assert.deepEqual(prettyHours("24/7"), ["Open 24 hours, every day"]);
   assert.deepEqual(prettyHours(""), []);
   assert.deepEqual(prettyHours(undefined), []);
