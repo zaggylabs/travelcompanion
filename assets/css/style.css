@@ -214,3 +214,37 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 .day-bars { display: grid; gap: 6px; margin-top: 8px; }
 .day-bar { display: grid; grid-template-columns: 110px 1fr 96px; align-items: center; gap: 12px; font-size: 0.9rem; }
 @media (max-width: 480px) { .day-bar { grid-template-columns: 84px 1fr 80px; gap: 8px; font-size: 0.8rem; } }
+
+/* Attachments */
+.item-wrap { display: flex; align-items: stretch; gap: 6px; }
+.item-wrap .item { flex: 1; min-width: 0; }
+.attach-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px; flex-shrink: 0;
+  min-width: 44px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); color: var(--subtle); cursor: pointer; font-size: 0.8rem; font-weight: 600;
+}
+.attach-btn svg, .attach-panel .btn svg { width: 16px; height: 16px; }
+.attach-btn:hover { color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.attach-btn.has { color: var(--accent-strong); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+:root[data-theme="dark"] .attach-btn.has { color: var(--good); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .attach-btn.has { color: var(--good); } }
+.item-wrap.open .attach-btn { border-color: var(--accent); }
+.attach-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.attach-panel { margin-top: 6px; padding: 12px; display: grid; gap: 10px; border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.attach-panel.drop { border-style: dashed; background: var(--accent-soft); }
+.attach-panel .error { margin: 0; }
+.files { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.file { display: flex; align-items: center; gap: 10px; }
+.file-thumb-link { flex-shrink: 0; text-decoration: none; }
+.file-thumb {
+  display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; overflow: hidden;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--muted-bg);
+  color: var(--bad); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.03em;
+}
+.file-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.file-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.file-name { color: var(--fg); font-weight: 550; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-name[href] { color: var(--accent-strong); }
+:root[data-theme="dark"] .file-name[href] { color: var(--good); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .file-name[href] { color: var(--good); } }
+.file .btn { flex-shrink: 0; }

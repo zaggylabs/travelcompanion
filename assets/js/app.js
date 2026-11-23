@@ -4,6 +4,9 @@ import { formatMoney } from "./lib/money.js";
 import { expectedCost, summarizeBudget } from "./lib/budget.js";
 import { csvToItems, itemsToCsv } from "./lib/csv.js";
 import { deleteTrip, loadTrips, saveTrip, STORAGE_KEY } from "./lib/store.js";
+import {
+  ACCEPT, MAX_FILE_BYTES, deleteFile, deleteItemFiles, deleteTripFiles, formatSize, getFile, isAllowedType, putFile, requestPersistence,
+} from "./lib/files.js";
 
 /* ---------- tiny DOM helper ---------- */
 
@@ -36,6 +39,10 @@ const ui = {
   confirmDelete: false,
   editingItem: null, // { mode: "new", date } | { mode: "edit", id }
   notice: null,
+  attachOpen: null, // item id whose attachments panel is open
+  attachBusy: false,
+  attachError: null,
+  confirmRemoveFile: null, // attachment id awaiting "Remove?" confirmation
 };
 
 function currentTripId() {
@@ -44,7 +51,7 @@ function currentTripId() {
 }
 
 function openTrip(id) {
-  Object.assign(ui, { tab: "itinerary", editingTrip: false, confirmDelete: false, editingItem: null, notice: null });
+  Object.assign(ui, { tab: "itinerary", editingTrip: false, confirmDelete: false, editingItem: null, notice: null, attachOpen: null, attachError: null, confirmRemoveFile: null });
   location.hash = id ? `trip/${encodeURIComponent(id)}` : "";
   if (!id) history.replaceState(null, "", location.pathname + location.search);
   render();
@@ -78,6 +85,7 @@ function sortItems(items) {
 const root = document.getElementById("app");
 
 function render() {
+  revokeFileUrls();
   const trips = loadTrips();
   const id = currentTripId();
   const trip = trips.find((t) => t.id === id);
@@ -183,7 +191,7 @@ function tripView(trip) {
           () => { ui.editingTrip = false; ui.confirmDelete = false; render(); }),
         h("div", { class: "danger-zone" }, ui.confirmDelete
           ? [h("span", null, "Delete this trip and all its plans? This can't be undone."),
-             h("button", { class: "btn danger", type: "button", onclick: () => { deleteTrip(trip.id); openTrip(null); } }, "Yes, delete"),
+             h("button", { class: "btn danger", type: "button", onclick: () => { deleteTrip(trip.id); deleteTripFiles(trip.id); openTrip(null); } }, "Yes, delete"),
              h("button", { class: "btn", type: "button", onclick: () => { ui.confirmDelete = false; render(); } }, "Keep it")]
           : h("button", { class: "btn danger", type: "button", onclick: () => { ui.confirmDelete = true; render(); } }, "Delete trip")))
     : h("div", { class: "page-head" },
@@ -208,7 +216,7 @@ function tripView(trip) {
       h("button", { type: "button", "aria-label": "Dismiss", onclick: () => { ui.notice = null; render(); } }, "✕")),
     h("div", { class: "tabs", role: "tablist" }, ["itinerary", "budget"].map((t) =>
       h("button", { role: "tab", type: "button", "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
-        onclick: () => { ui.tab = t; ui.editingItem = null; render(); } }, t === "itinerary" ? "Itinerary" : "Budget"))),
+        onclick: () => { ui.tab = t; ui.editingItem = null; ui.attachOpen = null; render(); } }, t === "itinerary" ? "Itinerary" : "Budget"))),
     ui.tab === "itinerary" ? itineraryView(trip, days) : budgetView(trip, days));
 }
 
@@ -270,18 +278,44 @@ function itineraryView(trip, days) {
           g.items.map((item) => h("li", null, e?.mode === "edit" && e.id === item.id
             ? itemForm(item, trip, days, saveItem, cancel, () => {
                 saveTrip({ ...trip, items: trip.items.filter((i) => i.id !== item.id) });
+                deleteItemFiles(item.id);
                 ui.editingItem = null;
                 render();
               })
-            : itemRow(item, trip))),
+            : [itemRow(item, trip), ui.attachOpen === item.id && attachPanel(item, trip)])),
           h("li", null, e?.mode === "new" && e.date === g.key
             ? itemForm(emptyItem(g.key), trip, days, saveItem, cancel)
-            : h("button", { class: "btn ghost", type: "button", onclick: () => { ui.editingItem = { mode: "new", date: g.key }; render(); } }, "+ Add plan"))));
+            : h("button", { class: "btn ghost", type: "button", onclick: () => { ui.editingItem = { mode: "new", date: g.key }; ui.attachOpen = null; render(); } }, "+ Add plan"))));
     }));
 }
 
+const clipIcon = () => {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = '<path d="M21.4 11.1 12.2 20.3a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+  return svg;
+};
+
 function itemRow(item, trip) {
-  return h("button", { class: "item", type: "button", onclick: () => { ui.editingItem = { mode: "edit", id: item.id }; render(); } },
+  const files = item.attachments ?? [];
+  const open = ui.attachOpen === item.id;
+  return h("div", { class: `item-wrap${open ? " open" : ""}` },
+    itemButton(item, trip),
+    h("button", {
+      class: `attach-btn${files.length ? " has" : ""}`, type: "button",
+      "aria-expanded": String(open),
+      "aria-label": `Attachments for ${item.title}${files.length ? ` (${files.length})` : ""}`,
+      title: files.length ? `${plural(files.length, "attachment")}` : "Attach tickets or files",
+      onclick: () => {
+        Object.assign(ui, { attachOpen: open ? null : item.id, attachError: null, confirmRemoveFile: null, editingItem: null });
+        render();
+      },
+    }, clipIcon(), files.length ? h("span", { class: "num" }, files.length) : null));
+}
+
+function itemButton(item, trip) {
+  return h("button", { class: "item", type: "button", onclick: () => { ui.editingItem = { mode: "edit", id: item.id }; ui.attachOpen = null; render(); } },
     h("span", { class: "item-time num muted" }, item.time || "--:--"),
     h("span", { class: "item-main" },
       h("span", { class: "item-title" }, item.title),
@@ -294,6 +328,120 @@ function itemRow(item, trip) {
       item.actualCost !== null && item.actualCost !== undefined
         ? [formatMoney(item.actualCost, trip.currency), h("small", { class: "paid" }, "Paid")]
         : item.estimatedCost > 0 ? [formatMoney(item.estimatedCost, trip.currency), h("small", { class: "muted" }, "Estimate")] : ""));
+}
+
+/* ----- attachments ----- */
+
+let fileUrls = [];
+function revokeFileUrls() {
+  for (const u of fileUrls) URL.revokeObjectURL(u);
+  fileUrls = [];
+}
+
+// Re-reads the trip before writing so a slow upload never overwrites newer edits.
+function updateAttachments(tripId, itemId, fn) {
+  const trip = loadTrips().find((t) => t.id === tripId);
+  if (!trip) return;
+  saveTrip({ ...trip, items: trip.items.map((i) => (i.id === itemId ? { ...i, attachments: fn(i.attachments ?? []) } : i)) });
+}
+
+async function addAttachments(trip, item, fileList) {
+  const files = [...fileList];
+  const rejected = files.filter((f) => !isAllowedType(f));
+  const tooBig = files.filter((f) => isAllowedType(f) && f.size > MAX_FILE_BYTES);
+  const ok = files.filter((f) => isAllowedType(f) && f.size <= MAX_FILE_BYTES);
+  const problems = [];
+  if (rejected.length) problems.push(`Only images and PDFs can be attached (skipped ${rejected.map((f) => f.name).join(", ")}).`);
+  if (tooBig.length) problems.push(`Files must be under ${formatSize(MAX_FILE_BYTES)} (skipped ${tooBig.map((f) => f.name).join(", ")}).`);
+  ui.attachBusy = ok.length > 0;
+  ui.attachError = problems.join(" ") || null;
+  render();
+  if (!ok.length) return;
+  requestPersistence();
+  const saved = [];
+  try {
+    for (const file of ok) saved.push(await putFile({ id: newId(), tripId: trip.id, itemId: item.id, file }));
+  } catch (err) {
+    const name = err?.name || err?.message;
+    problems.push(name === "QuotaExceededError"
+      ? "This browser is out of storage space for files. Remove some attachments and try again."
+      : "Couldn't save the file in this browser. Private browsing can block file storage.");
+  }
+  if (saved.length) updateAttachments(trip.id, item.id, (list) => [...list, ...saved]);
+  ui.attachBusy = false;
+  ui.attachError = problems.join(" ") || null;
+  render();
+}
+
+async function removeAttachment(trip, item, fileId) {
+  try { await deleteFile(fileId); } catch { /* metadata goes anyway */ }
+  updateAttachments(trip.id, item.id, (list) => list.filter((f) => f.id !== fileId));
+  ui.confirmRemoveFile = null;
+  render();
+}
+
+function attachPanel(item, trip) {
+  const files = item.attachments ?? [];
+  const input = h("input", { type: "file", accept: ACCEPT, multiple: true, hidden: true, "aria-label": "Files to attach" });
+  input.addEventListener("change", () => {
+    const list = input.files;
+    if (list?.length) addAttachments(trip, item, list);
+    input.value = "";
+  });
+
+  const rows = files.map((f) => {
+    const isImage = f.type.startsWith("image/");
+    const thumb = h("span", { class: "file-thumb" }, isImage ? "" : "PDF");
+    const name = h("a", { class: "file-name", target: "_blank", rel: "noopener" }, f.name);
+    const thumbLink = h("a", { class: "file-thumb-link", target: "_blank", rel: "noopener", tabindex: "-1", "aria-hidden": "true" }, thumb);
+    const status = h("span", { class: "small muted" }, formatSize(f.size));
+    // Load the stored file and point the link (and thumbnail) at it.
+    getFile(f.id).then((rec) => {
+      if (!rec?.blob) {
+        status.textContent = "Missing on this device";
+        status.className = "small bad";
+        return;
+      }
+      const url = URL.createObjectURL(rec.blob);
+      if (!name.isConnected) { URL.revokeObjectURL(url); return; }
+      fileUrls.push(url);
+      name.href = url;
+      if (isImage) thumb.replaceChildren(h("img", { src: url, alt: "" }));
+      thumbLink.href = url;
+    }).catch(() => {
+      status.textContent = "Couldn't open file storage";
+      status.className = "small bad";
+    });
+    const confirming = ui.confirmRemoveFile === f.id;
+    return h("li", { class: "file" },
+      thumbLink,
+      h("span", { class: "file-main" }, name, status),
+      confirming
+        ? h("span", { class: "actions" },
+            h("button", { class: "btn danger", type: "button", onclick: () => removeAttachment(trip, item, f.id) }, "Remove"),
+            h("button", { class: "btn", type: "button", onclick: () => { ui.confirmRemoveFile = null; render(); } }, "Keep"))
+        : h("button", { class: "btn ghost", type: "button", "aria-label": `Remove ${f.name}`, onclick: () => { ui.confirmRemoveFile = f.id; render(); } }, "Remove"));
+  });
+
+  const panel = h("div", { class: "attach-panel card", role: "region", "aria-label": `Attachments for ${item.title}` },
+    files.length
+      ? h("ul", { class: "files" }, rows)
+      : h("p", { class: "small muted" }, "No attachments yet. Add tickets, booking confirmations or screenshots (images or PDFs)."),
+    ui.attachError && h("p", { class: "error" }, ui.attachError),
+    h("div", { class: "actions" },
+      h("button", { class: "btn", type: "button", disabled: ui.attachBusy, onclick: () => input.click() },
+        clipIcon(), ui.attachBusy ? "Saving…" : "Attach file"),
+      h("span", { class: "small muted" }, "Saved in this browser only, not included in CSV exports."),
+      input));
+  // Dropping files onto the panel attaches them too.
+  panel.addEventListener("dragover", (e) => { e.preventDefault(); panel.classList.add("drop"); });
+  panel.addEventListener("dragleave", () => panel.classList.remove("drop"));
+  panel.addEventListener("drop", (e) => {
+    e.preventDefault();
+    panel.classList.remove("drop");
+    if (e.dataTransfer?.files?.length && !ui.attachBusy) addAttachments(trip, item, e.dataTransfer.files);
+  });
+  return panel;
 }
 
 function itemForm(item, trip, days, onSave, onCancel, onDelete) {

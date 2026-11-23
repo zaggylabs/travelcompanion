@@ -9,6 +9,7 @@ Live: https://travelcompanion.pages.dev
 
 - **Trips** have a destination, dates, a currency and a number of travelers.
 - **Itinerary:** a day-by-day plan. Each plan has a time, a place, a category, notes, a link, an estimated cost, and the actual cost once it's paid. Anything without a day goes under *Unscheduled*.
+- **Attachments:** the paperclip button next to each plan lets you attach tickets, booking confirmations or screenshots (images and PDFs, up to 25 MB each), then open or remove them. Files are stored in the browser's IndexedDB, so they stay on the device and aren't part of CSV exports.
 - **Budget:** set a limit per category (flights, lodging, transport, food, activities, shopping, other) and compare it with what's estimated, what's been paid and the expected total. You also get totals per person and per day.
 - **CSV import and export:** bring in an existing spreadsheet (in Excel, use File › Save As › CSV) or download a trip to open in Excel or Google Sheets. The importer understands common column names like *Day, Activity, Place, Cost, Paid, Notes*. It reads dates as day/month/year and handles `$1,200.00` / `1.234,50` style amounts and 12-hour times.
 
@@ -27,6 +28,7 @@ assets/js/lib/           Plain logic with no DOM, unit tested
   csv.js                 CSV parsing, column matching, export
   dates.js money.js      Parsing and formatting helpers
   store.js               Saving trips in localStorage
+  files.js               Saving attachments in IndexedDB
 tests/                   Unit tests for assets/js/lib
 _headers                 Cloudflare security headers
 ```
