@@ -59,3 +59,15 @@ test("mapsLink builds a Google Maps search link", () => {
   assert.equal(mapsLink({ name: "Tokyo Disneyland", area: "Urayasu", country: "Japan" }),
     "https://www.google.com/maps/search/?api=1&query=Tokyo%20Disneyland%2C%20Urayasu%2C%20Japan");
 });
+
+test("rankPlaces keeps Photon's top hit when it's a famous landmark", () => {
+  const ranked = rankPlaces([
+    feature("Eiffel Tower", "man_made", "tower", { district: "Paris", city: "Paris", state: "Île-de-France" }),
+    ...[1, 2, 3, 4, 5].map((n) => feature(`Eiffel bus stop ${n}`, "highway", "bus_stop")),
+    feature("Eiffel XV", "tourism", "hotel", { district: "Paris", city: "Paris", state: "Paris" }),
+  ], "eiffel");
+  assert.equal(ranked[0].name, "Eiffel Tower");
+  assert.equal(ranked[0].area, "Paris, Île-de-France");
+  assert.equal(ranked[1].area, "Paris");
+  assert.ok(!ranked.some((p) => p.name.includes("bus stop")));
+});

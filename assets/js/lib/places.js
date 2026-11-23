@@ -15,6 +15,7 @@ const WEIGHTS = {
   "place=neighbourhood": 5, "place=island": 7, "railway=station": 6, "building=train_station": 6,
   "public_transport=station": 6, "tourism=hotel": 6, "tourism=hostel": 5, "tourism=guest_house": 5,
   "tourism=apartment": 4, "natural=peak": 7, "natural=beach": 7, "natural=volcano": 7, "natural=waterfall": 7,
+  "man_made=tower": 8, "man_made=lighthouse": 7, "man_made=bridge": 5,
   "historic=castle": 8, "historic=monument": 7, "historic=memorial": 3,
   "amenity=parking": 0, "building=roof": 0, "building=yes": 0, "office=company": 0, "highway": 0,
 };
@@ -52,8 +53,7 @@ export function rankPlaces(features, query, limit = 8) {
     if (!p.name) return;
     const weight = placeWeight(p);
     if (weight === 0) return;
-    const area = [p.district && p.district !== p.name ? p.district : null, p.city && p.city !== p.name ? p.city : null, p.state !== p.city ? p.state : null]
-      .filter(Boolean).slice(0, 2).join(", ");
+    const area = [...new Set([p.district, p.city, p.state].filter((x) => x && x !== p.name))].slice(0, 2).join(", ");
     const key = `${norm(p.name)}|${norm(p.city || p.state)}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -68,7 +68,8 @@ export function rankPlaces(features, query, limit = 8) {
       kind: String(p.osm_value ?? "").replace(/_/g, " "),
       category: categoryForPlace(p),
       lat, lon,
-      score: weight + textBoost - i * 0.05,
+      // Photon already ranks famous places first, so its top few results get a head start.
+      score: weight + textBoost + Math.max(0, 4 - i) - i * 0.05,
     });
   });
   return out.sort((a, b) => b.score - a.score).slice(0, limit);
