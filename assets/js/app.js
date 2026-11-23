@@ -136,10 +136,25 @@ function tripList(trips) {
       : !creating && h("p", { class: "card pad center muted" }, "No trips yet. Create one to get started."));
 }
 
+// Windows has no flag emoji (it shows the letters "JP"), so only use flags where they draw in colour.
+const FLAGS_OK = (() => {
+  try {
+    const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    ctx.canvas.width = ctx.canvas.height = 20;
+    ctx.font = "16px sans-serif";
+    ctx.textBaseline = "top";
+    ctx.fillText("\u{1F1EF}\u{1F1F5}", 0, 0); // Japan: should have red in it
+    const px = ctx.getImageData(0, 0, 20, 20).data;
+    for (let i = 0; i < px.length; i += 4) if (px[i] > 150 && px[i + 1] < 100 && px[i + 2] < 100) return true;
+  } catch { /* no canvas */ }
+  return false;
+})();
+const countryIcon = (code) => (FLAGS_OK && code ? flag(code) : "🌏");
+
 // "🇯🇵 Japan · Tokyo & Osaka"
 function placeLine(trip) {
   const c = getCountry(trip.country);
-  return [c && `${flag(c.code)} ${c.name}`, trip.destination].filter(Boolean).join(" · ");
+  return [c && (FLAGS_OK ? `${flag(c.code)} ${c.name}` : c.name), trip.destination].filter(Boolean).join(" · ");
 }
 
 function field(label, control, cls) {
@@ -157,10 +172,10 @@ function tripForm(initial, submitLabel, onSubmit, onCancel) {
   const countryInput = h("input", {
     name: "countryName", placeholder: "Start typing, e.g. Japan", value: country?.name ?? "",
   });
-  const countryFlag = h("span", { class: "country-flag", "aria-hidden": "true" }, country ? flag(country.code) : "🌏");
+  const countryFlag = h("span", { class: "country-flag", "aria-hidden": "true" }, countryIcon(country?.code));
   const setCountry = (c, picked) => {
     country = c;
-    countryFlag.textContent = c ? flag(c.code) : "🌏";
+    countryFlag.textContent = countryIcon(c?.code);
     if (c) {
       if (picked) countryInput.value = c.name;
       if (![...currencySelect.options].some((o) => o.value === c.currency)) currencySelect.prepend(h("option", null, c.currency));
@@ -171,7 +186,7 @@ function tripForm(initial, submitLabel, onSubmit, onCancel) {
   };
   const countryBox = autocomplete(countryInput, {
     search: (q) => searchCountries(q),
-    renderItem: (c) => [h("span", { class: "ac-icon", "aria-hidden": "true" }, flag(c.code)), h("span", { class: "ac-main" }, h("span", { class: "ac-title" }, c.name)), h("span", { class: "ac-tag num" }, c.currency)],
+    renderItem: (c) => [FLAGS_OK && h("span", { class: "ac-icon", "aria-hidden": "true" }, flag(c.code)), h("span", { class: "ac-main" }, h("span", { class: "ac-title" }, c.name)), h("span", { class: "ac-tag num" }, c.currency)].filter(Boolean),
     onPick: (c) => setCountry(c, true),
     emptyText: () => "No country matches that.",
   });
