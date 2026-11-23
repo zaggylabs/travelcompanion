@@ -22,6 +22,19 @@ npm run typecheck
 npm run build
 ```
 
+### Deploying (Cloudflare Pages)
+
+The app is a static export (`output: "export"` in `next.config.ts`), so `npm run build` writes a plain static site to `out/`. In Cloudflare Pages use these build settings:
+
+| Setting | Value |
+| --- | --- |
+| Framework preset | None |
+| Build command | `npm run build` |
+| Build output directory | `out` |
+| Node version | 22 (from `.nvmrc`) |
+
+Any other static host (GitHub Pages, Netlify, S3) works the same way.
+
 ### Project layout
 
 ```

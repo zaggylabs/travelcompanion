@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Static export: the app runs entirely in the browser, so it can be hosted
+  // on any static host (Cloudflare Pages, GitHub Pages, Netlify...). Output goes to `out/`.
+  output: "export",
   turbopack: {
     rules: {
       "*.css": {
