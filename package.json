@@ -1,0 +1,9 @@
+{
+  "name": "travelcompanion",
+  "private": true,
+  "type": "module",
+  "description": "Plain static site. No build step: Cloudflare Pages serves the repo root. This file only exists so `npm test` runs the unit tests.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}
