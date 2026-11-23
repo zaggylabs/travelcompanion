@@ -333,8 +333,11 @@ function summaryContent(trip, days, draft) {
       h("div", null, h("span", { class: "small muted" }, "Paid so far"), h("strong", { class: "num good" }, money(s.totalSpent))),
       h("div", null, h("span", { class: "small muted" }, "Still to pay"), h("strong", { class: "num" }, money(toPay)))),
     s.totalProjected > 0 && h("div", { class: "bar", title: `${Math.round((s.totalSpent / s.totalProjected) * 100)}% paid` }, h("div", { style: `width:${pct(s.totalSpent, s.totalProjected)}` })),
-    hasBudget && h("p", { class: `small ${over ? "bad strong" : "muted"}` },
+    // Compare with the total budget only when every category with costs has a limit; otherwise call out each category that's over.
+    hasBudget && cats.every((c) => c.budget !== null) && h("p", { class: `small ${over ? "bad strong" : "muted"}` },
       over ? `${money(Math.abs(s.remaining))} over your ${money(s.totalBudget)} budget` : `${money(s.remaining)} left of your ${money(s.totalBudget)} budget`),
+    hasBudget && !cats.every((c) => c.budget !== null) && cats.filter((c) => c.budget !== null && c.projected > c.budget).map((c) =>
+      h("p", { class: "small bad strong" }, `${c.category} is ${money(c.projected - c.budget)} over its ${money(c.budget)} limit`)),
     h("section", { class: "summary-sec" },
       h("h3", null, "By category"),
       h("ul", { class: "summary-list" }, cats.map((c) => h("li", null,
