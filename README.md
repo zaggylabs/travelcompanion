@@ -7,7 +7,8 @@ Live: https://travelcompanion.pages.dev
 
 ## What it does
 
-- **Trips** have a destination, dates, a currency and a number of travelers.
+- **Trips** have a country, the cities or areas you're visiting, dates, a currency and a number of travelers. Picking the country sets the currency for you (Japan → JPY), and you can still change it.
+- **Place suggestions:** when you add a plan, typing a name (say *Disney*) suggests real places in the trip's country (*Tokyo Disneyland, Urayasu*). Picking one fills in where it is, a Google Maps link and a likely category. Suggestions come from [Photon](https://photon.komoot.io), a free search over OpenStreetMap data, asked at most once per pause in typing.
 - **Itinerary:** a day-by-day plan. Each plan has a time, a place, a category, notes, a link, an estimated cost, and the actual cost once it's paid. Anything without a day goes under *Unscheduled*.
 - **Attachments:** the paperclip button next to each plan lets you attach tickets, booking confirmations or screenshots (images and PDFs, up to 25 MB each), then open or remove them. Files are stored in the browser's IndexedDB, so they stay on the device and aren't part of CSV exports.
 - **Budget:** set a limit per category (flights, lodging, transport, food, activities, shopping, other) and compare it with what's estimated, what's been paid and the expected total. You also get totals per person and per day.
@@ -21,9 +22,12 @@ It's a plain static site: HTML, CSS and JavaScript modules with **no build step*
 index.html               The page shell (header, footer, #app)
 assets/css/style.css     All styles (light/dark tokens at the top)
 assets/js/app.js         The UI: trip list, trip view, itinerary, budget, forms
+assets/js/autocomplete.js  The suggestion dropdown used for countries and places
 assets/js/theme.js       Light/dark toggle (follows the system until you pick one)
 assets/js/lib/           Plain logic with no DOM, unit tested
-  constants.js           Categories, currencies, ids
+  constants.js           Categories, ids
+  countries.js           Countries, their currencies and flags
+  places.js              Place search (Photon) and ranking
   budget.js              Totals by category, day and person
   csv.js                 CSV parsing, column matching, export
   dates.js money.js      Parsing and formatting helpers

@@ -248,3 +248,29 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 :root[data-theme="dark"] .file-name[href] { color: var(--good); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .file-name[href] { color: var(--good); } }
 .file .btn { flex-shrink: 0; }
+
+/* Autocomplete (country and place suggestions) */
+.ac { position: relative; min-width: 0; width: 100%; }
+.ac-list {
+  position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 4px;
+  list-style: none; max-height: 320px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12); min-width: min(100%, 280px);
+  font-weight: 400; color: var(--fg);
+}
+.ac-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 0.9rem; }
+.ac-item[aria-selected="true"] { background: var(--accent-soft); }
+.ac-icon { flex: none; width: 1.4em; text-align: center; }
+.ac-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ac-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-tag { flex: none; font-size: 0.72rem; color: var(--subtle); background: var(--muted-bg); padding: 1px 7px; border-radius: 999px; text-transform: capitalize; }
+.ac-status { padding: 8px 10px; }
+.ac-foot { padding: 6px 10px 2px; border-top: 1px solid var(--line); margin-top: 4px; }
+.with-flag { display: flex; align-items: center; gap: 8px; }
+.country-flag { flex: none; font-size: 1.3rem; line-height: 1; }
+.form-note { align-self: end; padding-bottom: 8px; }
+.hint-inline { color: var(--accent-strong); font-weight: 550; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hint-inline { color: var(--good); } }
+:root[data-theme="dark"] .hint-inline { color: var(--good); }
+:root[data-theme="dark"] .ac-list { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }

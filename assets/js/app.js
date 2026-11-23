@@ -1,4 +1,7 @@
-import { CATEGORIES, CURRENCIES, newId } from "./lib/constants.js";
+import { CATEGORIES, newId } from "./lib/constants.js";
+import { ALL_CURRENCIES, findCountry, flag, getCountry, searchCountries } from "./lib/countries.js";
+import { mapsLink, searchPlaces } from "./lib/places.js";
+import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
 import { expectedCost, summarizeBudget } from "./lib/budget.js";
@@ -60,7 +63,7 @@ function openTrip(id) {
 function emptyTrip() {
   const now = new Date().toISOString();
   return {
-    id: newId(), name: "", destination: "", startDate: "", endDate: "",
+    id: newId(), name: "", country: "", destination: "", startDate: "", endDate: "",
     currency: "SGD", travelers: 1, budget: {}, items: [], createdAt: now, updatedAt: now,
   };
 }
@@ -122,7 +125,7 @@ function tripList(trips) {
           const s = summarizeBudget(t, days);
           return h("li", null, h("button", { class: "trip-card", type: "button", onclick: () => openTrip(t.id) },
             h("strong", null, t.name),
-            h("span", { class: "muted" }, t.destination || "No destination yet"),
+            h("span", { class: "muted" }, placeLine(t) || "No destination yet"),
             h("span", { class: "small muted" }, t.startDate && t.endDate
               ? `${formatDay(t.startDate)} to ${formatDay(t.endDate)} · ${plural(days, "day")}`
               : "Dates not set"),
@@ -133,21 +136,58 @@ function tripList(trips) {
       : !creating && h("p", { class: "card pad center muted" }, "No trips yet. Create one to get started."));
 }
 
+// "🇯🇵 Japan · Tokyo & Osaka"
+function placeLine(trip) {
+  const c = getCountry(trip.country);
+  return [c && `${flag(c.code)} ${c.name}`, trip.destination].filter(Boolean).join(" · ");
+}
+
 function field(label, control, cls) {
   return h("label", { class: `field ${cls || ""}` }, h("span", null, label), control);
 }
 
 function tripForm(initial, submitLabel, onSubmit, onCancel) {
-  const currencies = CURRENCIES.includes(initial.currency) ? CURRENCIES : [initial.currency, ...CURRENCIES];
+  const currencies = ALL_CURRENCIES.includes(initial.currency) ? ALL_CURRENCIES : [initial.currency, ...ALL_CURRENCIES];
   const error = h("p", { class: "error", hidden: true }, "The end date is before the start date.");
+
+  // Country: pick one and the currency follows. Older trips without one get a guess from the destination.
+  let country = getCountry(initial.country) ?? (initial.country === undefined ? findCountry(initial.destination) : null);
+  const currencySelect = h("select", { name: "currency" }, currencies.map((c) => h("option", { selected: c === initial.currency }, c)));
+  const currencyHint = h("span", { class: "hint-inline" });
+  const countryInput = h("input", {
+    name: "countryName", placeholder: "Start typing, e.g. Japan", value: country?.name ?? "",
+  });
+  const countryFlag = h("span", { class: "country-flag", "aria-hidden": "true" }, country ? flag(country.code) : "🌏");
+  const setCountry = (c, picked) => {
+    country = c;
+    countryFlag.textContent = c ? flag(c.code) : "🌏";
+    if (c) {
+      if (picked) countryInput.value = c.name;
+      if (![...currencySelect.options].some((o) => o.value === c.currency)) currencySelect.prepend(h("option", null, c.currency));
+      const changed = currencySelect.value !== c.currency;
+      currencySelect.value = c.currency;
+      currencyHint.textContent = changed ? `Set to ${c.currency} for ${c.name}` : "";
+    }
+  };
+  const countryBox = autocomplete(countryInput, {
+    search: (q) => searchCountries(q),
+    renderItem: (c) => [h("span", { class: "ac-icon", "aria-hidden": "true" }, flag(c.code)), h("span", { class: "ac-main" }, h("span", { class: "ac-title" }, c.name)), h("span", { class: "ac-tag num" }, c.currency)],
+    onPick: (c) => setCountry(c, true),
+    emptyText: () => "No country matches that.",
+  });
+  countryInput.addEventListener("input", () => setCountry(findCountry(countryInput.value), false));
+  currencySelect.addEventListener("change", () => { currencyHint.textContent = ""; });
+
   const form = h("form", { class: "form-grid two" },
-    field("Trip name", h("input", { name: "name", required: true, autofocus: true, placeholder: "Bali with the family", value: initial.name }), "span-all"),
-    field("Destination", h("input", { name: "destination", placeholder: "Ubud & Seminyak", value: initial.destination })),
-    h("div", { class: "form-grid two tight" },
-      field("Currency", h("select", { name: "currency" }, currencies.map((c) => h("option", { selected: c === initial.currency }, c)))),
-      field("Travelers", h("input", { name: "travelers", type: "number", min: 1, value: initial.travelers }))),
+    field("Trip name", h("input", { name: "name", required: true, autofocus: true, placeholder: "Japan with the family", value: initial.name }), "span-all"),
+    field("Country", h("div", { class: "with-flag" }, countryFlag, countryBox.el)),
+    field("Cities or areas", h("input", { name: "destination", placeholder: "Tokyo & Osaka", value: initial.destination })),
     field("Start date", h("input", { name: "startDate", type: "date", value: initial.startDate })),
     field("End date", h("input", { name: "endDate", type: "date", value: initial.endDate })),
+    h("div", { class: "form-grid two tight" },
+      field("Currency", currencySelect),
+      field("Travelers", h("input", { name: "travelers", type: "number", min: 1, value: initial.travelers }))),
+    h("p", { class: "small muted form-note" }, currencyHint),
     error,
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, submitLabel),
@@ -163,6 +203,7 @@ function tripForm(initial, submitLabel, onSubmit, onCancel) {
     onSubmit({
       ...initial,
       name,
+      country: (country ?? findCountry(countryInput.value))?.code ?? "",
       destination: String(f.get("destination")).trim(),
       currency: String(f.get("currency")),
       travelers: Math.max(1, Number(f.get("travelers")) || 1),
@@ -198,7 +239,7 @@ function tripView(trip) {
         h("div", null,
           h("h1", null, trip.name),
           h("p", { class: "muted" }, [
-            trip.destination,
+            placeLine(trip),
             days.length ? `${formatDay(days[0])} to ${formatDay(days[days.length - 1])} · ${plural(days.length, "day")}` : "Dates not set",
             plural(trip.travelers, "traveler"),
           ].filter(Boolean).join(" · "))),
@@ -445,20 +486,55 @@ function attachPanel(item, trip) {
 }
 
 function itemForm(item, trip, days, onSave, onCancel, onDelete) {
+  const country = getCountry(trip.country);
+  const titleInput = h("input", {
+    name: "title", required: true, autofocus: true, value: item.title,
+    placeholder: country ? `Try "Disney" or a place in ${country.name}` : "Sunset at Uluwatu",
+  });
+  const categorySelect = h("select", { name: "category" }, CATEGORIES.map((c) => h("option", { selected: c === item.category }, c)));
+  const locationInput = h("input", { name: "location", placeholder: "Address or area", value: item.location });
+  const linkInput = h("input", { name: "link", type: "url", placeholder: "https://", value: item.link });
+  let categoryTouched = Boolean(item.title); // don't second-guess a category on an existing plan
+  categorySelect.addEventListener("change", () => { categoryTouched = true; });
+  let autoLocation = null; // what we filled in, so a later pick can replace it
+  let autoLink = null;
+
+  // Typing a place suggests real ones in the trip's country, and fills in the rest of the form.
+  const placeBox = autocomplete(titleInput, {
+    delay: 350,
+    search: (q, signal) => searchPlaces(q, country?.code, signal),
+    renderItem: (p) => [
+      h("span", { class: "ac-icon", "aria-hidden": "true" }, "📍"),
+      h("span", { class: "ac-main" },
+        h("span", { class: "ac-title" }, p.name),
+        h("span", { class: "ac-sub small muted" }, [p.area, !country && p.country].filter(Boolean).join(", "))),
+      p.kind && h("span", { class: "ac-tag" }, p.kind),
+    ].filter(Boolean),
+    footer: () => h("span", { class: "small muted" }, "Places from © OpenStreetMap contributors"),
+    onPick: (p) => {
+      titleInput.value = p.name;
+      if (!locationInput.value.trim() || locationInput.value === autoLocation) {
+        locationInput.value = autoLocation = [p.area, !country && p.country].filter(Boolean).join(", ");
+      }
+      if (!linkInput.value.trim() || linkInput.value === autoLink) linkInput.value = autoLink = mapsLink(p);
+      if (p.category && !categoryTouched) categorySelect.value = p.category;
+    },
+  });
+
   const useSelect = days.length > 0 && (item.date === "" || days.includes(item.date));
   const form = h("form", { class: "card pad form-grid six editing" },
-    field("What", h("input", { name: "title", required: true, autofocus: true, placeholder: "Sunset at Uluwatu", value: item.title }), "span-4"),
-    field("Category", h("select", { name: "category" }, CATEGORIES.map((c) => h("option", { selected: c === item.category }, c))), "span-2"),
+    field("What", placeBox.el, "span-4"),
+    field("Category", categorySelect, "span-2"),
     field("Day", useSelect
       ? h("select", { name: "date" },
           h("option", { value: "", selected: item.date === "" }, "Unscheduled"),
           days.map((d, i) => h("option", { value: d, selected: d === item.date }, `Day ${i + 1} · ${formatDay(d)}`)))
       : h("input", { name: "date", type: "date", value: item.date }), "span-2"),
     field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
-    field("Where", h("input", { name: "location", placeholder: "Address or area", value: item.location }), "span-3"),
+    field("Where", locationInput, "span-3"),
     field(`Estimated cost (${trip.currency})`, h("input", { name: "estimatedCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: item.estimatedCost || "" }), "span-2"),
     field(`Actual cost (${trip.currency})`, h("input", { name: "actualCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "Not paid yet", value: item.actualCost ?? "" }), "span-2"),
-    field("Link", h("input", { name: "link", type: "url", placeholder: "https://", value: item.link }), "span-2"),
+    field("Link", linkInput, "span-2"),
     field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"),
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, "Save"),
