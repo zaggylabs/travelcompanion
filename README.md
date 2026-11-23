@@ -20,6 +20,7 @@ It's a plain static site: HTML, CSS and JavaScript modules with **no build step*
 index.html               The page shell (header, footer, #app)
 assets/css/style.css     All styles (light/dark tokens at the top)
 assets/js/app.js         The UI: trip list, trip view, itinerary, budget, forms
+assets/js/theme.js       Light/dark toggle (follows the system until you pick one)
 assets/js/lib/           Plain logic with no DOM, unit tested
   constants.js           Categories, currencies, ids
   budget.js              Totals by category, day and person
