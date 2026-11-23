@@ -276,7 +276,9 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 :root[data-theme="dark"] .ac-list { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
 
 /* Trip page: place info | itinerary | budget */
-.trip-page .wrap { max-width: 1480px; }
+.trip-page .wrap { max-width: none; }
+@media (min-width: 960px) { .trip-page .wrap { padding-left: 24px; padding-right: 24px; } }
+@media (min-width: 1600px) { .trip-page .wrap { padding-left: 32px; padding-right: 32px; } }
 .trip-layout { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .trip-main { min-width: 0; container-type: inline-size; }
 .trip-info, .trip-budget { min-width: 0; }
@@ -288,6 +290,9 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 @media (min-width: 1280px) {
   .trip-layout { grid-template-columns: 320px minmax(0, 1fr) 260px; }
   .trip-budget { display: block; grid-column: 3; grid-row: 1; position: sticky; top: 16px; }
+}
+@media (min-width: 1600px) {
+  .trip-layout { grid-template-columns: 360px minmax(0, 1fr) 320px; gap: 32px; }
 }
 .budget-soon { display: grid; gap: 8px; justify-items: start; border-style: dashed; background: transparent; }
 .budget-soon h2 { margin: 0; }
