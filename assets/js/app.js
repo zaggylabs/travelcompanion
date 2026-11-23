@@ -1,6 +1,7 @@
 import { CATEGORIES, newId } from "./lib/constants.js";
 import { ALL_CURRENCIES, findCountry, flag, getCountry, searchCountries } from "./lib/countries.js";
 import { mapsLink, searchPlaces } from "./lib/places.js";
+import { crowdTip, dayNote, getHolidays, getPlaceInfo } from "./lib/placeinfo.js";
 import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
@@ -46,7 +47,12 @@ const ui = {
   attachBusy: false,
   attachError: null,
   confirmRemoveFile: null, // attachment id awaiting "Remove?" confirmation
+  selectedItem: null, // plan whose place info shows in the info panel
 };
+
+// Wide screens get three columns (place info | itinerary | budget); narrower ones show the info under the selected plan.
+const WIDE = window.matchMedia("(min-width: 960px)");
+WIDE.addEventListener("change", () => render());
 
 function currentTripId() {
   const m = location.hash.match(/^#trip\/(.+)$/);
@@ -54,7 +60,7 @@ function currentTripId() {
 }
 
 function openTrip(id) {
-  Object.assign(ui, { tab: "itinerary", editingTrip: false, confirmDelete: false, editingItem: null, notice: null, attachOpen: null, attachError: null, confirmRemoveFile: null });
+  Object.assign(ui, { tab: "itinerary", selectedItem: null, editingTrip: false, confirmDelete: false, editingItem: null, notice: null, attachOpen: null, attachError: null, confirmRemoveFile: null });
   location.hash = id ? `trip/${encodeURIComponent(id)}` : "";
   if (!id) history.replaceState(null, "", location.pathname + location.search);
   render();
@@ -75,13 +81,12 @@ function emptyItem(date) {
   };
 }
 
-function sortItems(items) {
-  return [...items].sort((a, b) => {
-    if (!a.time && b.time) return 1;
-    if (a.time && !b.time) return -1;
-    return a.time.localeCompare(b.time) || a.title.localeCompare(b.title);
-  });
+function byTime(a, b) {
+  if (!a.time && b.time) return 1;
+  if (a.time && !b.time) return -1;
+  return a.time.localeCompare(b.time) || a.title.localeCompare(b.title);
 }
+const sortItems = (items) => [...items].sort(byTime);
 
 /* ---------- rendering ---------- */
 
@@ -92,6 +97,7 @@ function render() {
   const trips = loadTrips();
   const id = currentTripId();
   const trip = trips.find((t) => t.id === id);
+  document.body.classList.toggle("trip-page", Boolean(trip));
   root.replaceChildren(trip ? tripView(trip) : tripList(trips));
   root.querySelector("[autofocus]")?.focus();
 }
@@ -270,10 +276,32 @@ function tripView(trip) {
     ui.notice && h("div", { class: "notice", role: "status" },
       h("span", null, ui.notice),
       h("button", { type: "button", "aria-label": "Dismiss", onclick: () => { ui.notice = null; render(); } }, "✕")),
-    h("div", { class: "tabs", role: "tablist" }, ["itinerary", "budget"].map((t) =>
-      h("button", { role: "tab", type: "button", "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
-        onclick: () => { ui.tab = t; ui.editingItem = null; ui.attachOpen = null; render(); } }, t === "itinerary" ? "Itinerary" : "Budget"))),
-    ui.tab === "itinerary" ? itineraryView(trip, days) : budgetView(trip, days));
+    h("div", { class: "trip-layout" },
+      WIDE.matches && h("aside", { class: "trip-info", "aria-label": "About this place" }, infoPanel(selectedItem(trip, days), trip, days)),
+      h("div", { class: "trip-main stack" },
+        h("div", { class: "tabs", role: "tablist" }, ["itinerary", "budget"].map((t) =>
+          h("button", { role: "tab", type: "button", "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
+            onclick: () => { ui.tab = t; ui.editingItem = null; ui.attachOpen = null; render(); } }, t === "itinerary" ? "Itinerary" : "Budget"))),
+        ui.tab === "itinerary" ? itineraryView(trip, days) : budgetView(trip, days)),
+      h("aside", { class: "trip-budget", "aria-label": "Budget" },
+        h("div", { class: "card pad budget-soon" },
+          h("h2", null, "Budget"),
+          h("p", { class: "small muted" }, "A running budget for this trip will live here soon. For now, the Budget tab has the full breakdown."),
+          ui.tab !== "budget" && h("button", { class: "btn", type: "button", onclick: () => { ui.tab = "budget"; ui.editingItem = null; ui.attachOpen = null; render(); } }, "Open Budget tab")))));
+}
+
+/** Itinerary order: trip days, then dates outside the trip, then unscheduled. */
+function orderedItems(trip, days) {
+  const daySet = new Set(days);
+  const rank = (i) => (daySet.has(i.date) ? `0${i.date}` : i.date ? `1${i.date}` : "2");
+  return [...trip.items].sort((a, b) => rank(a).localeCompare(rank(b)) || byTime(a, b));
+}
+
+/** The plan the info panel is about: the one being edited, the one picked, or the first plan. */
+function selectedItem(trip, days) {
+  const e = ui.editingItem;
+  const id = e?.mode === "edit" ? e.id : ui.selectedItem;
+  return trip.items.find((i) => i.id === id) ?? orderedItems(trip, days)[0] ?? null;
 }
 
 function exportCsv(trip) {
@@ -320,6 +348,7 @@ function itineraryView(trip, days) {
     render();
   };
   const cancel = () => { ui.editingItem = null; render(); };
+  const selected = selectedItem(trip, days);
 
   return h("div", { class: "stack" },
     days.length === 0 && h("p", { class: "hint" }, "Set start and end dates in Edit trip to get a day-by-day plan."),
@@ -338,7 +367,8 @@ function itineraryView(trip, days) {
                 ui.editingItem = null;
                 render();
               })
-            : [itemRow(item, trip), ui.attachOpen === item.id && attachPanel(item, trip)])),
+            : [itemRow(item, trip, selected?.id === item.id), ui.attachOpen === item.id && attachPanel(item, trip),
+               !WIDE.matches && selected?.id === item.id && ui.selectedItem === item.id && h("div", { class: "info-inline" }, infoPanel(item, trip, days))])),
           h("li", null, e?.mode === "new" && e.date === g.key
             ? itemForm(emptyItem(g.key), trip, days, saveItem, cancel)
             : h("button", { class: "btn ghost", type: "button", onclick: () => { ui.editingItem = { mode: "new", date: g.key }; ui.attachOpen = null; render(); } }, "+ Add plan"))));
@@ -353,25 +383,45 @@ const clipIcon = () => {
   return svg;
 };
 
-function itemRow(item, trip) {
+const pencilIcon = () => {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+  return svg;
+};
+
+const editItem = (item) => { Object.assign(ui, { editingItem: { mode: "edit", id: item.id }, selectedItem: item.id, attachOpen: null }); render(); };
+
+function itemRow(item, trip, selected) {
   const files = item.attachments ?? [];
   const open = ui.attachOpen === item.id;
-  return h("div", { class: `item-wrap${open ? " open" : ""}` },
-    itemButton(item, trip),
+  return h("div", { class: `item-wrap${open ? " open" : ""}${selected ? " selected" : ""}` },
+    itemButton(item, trip, selected),
+    h("button", { class: "attach-btn", type: "button", "aria-label": `Edit ${item.title}`, title: "Edit plan", onclick: () => editItem(item) }, pencilIcon()),
     h("button", {
       class: `attach-btn${files.length ? " has" : ""}`, type: "button",
       "aria-expanded": String(open),
       "aria-label": `Attachments for ${item.title}${files.length ? ` (${files.length})` : ""}`,
       title: files.length ? `${plural(files.length, "attachment")}` : "Attach tickets or files",
       onclick: () => {
-        Object.assign(ui, { attachOpen: open ? null : item.id, attachError: null, confirmRemoveFile: null, editingItem: null });
+        Object.assign(ui, { attachOpen: open ? null : item.id, attachError: null, confirmRemoveFile: null, editingItem: null, selectedItem: item.id });
         render();
       },
     }, clipIcon(), files.length ? h("span", { class: "num" }, files.length) : null));
 }
 
-function itemButton(item, trip) {
-  return h("button", { class: "item", type: "button", onclick: () => { ui.editingItem = { mode: "edit", id: item.id }; ui.attachOpen = null; render(); } },
+// Clicking a plan shows its place info; clicking it again (or the pencil) edits it.
+function itemButton(item, trip, selected) {
+  return h("button", {
+    class: "item", type: "button", "aria-pressed": String(Boolean(selected)),
+    title: selected ? "Click again to edit" : "Show info about this place",
+    onclick: () => {
+      if (selected && ui.selectedItem === item.id) return editItem(item);
+      Object.assign(ui, { selectedItem: item.id, editingItem: null });
+      render();
+    },
+  },
     h("span", { class: "item-time num muted" }, item.time || "--:--"),
     h("span", { class: "item-main" },
       h("span", { class: "item-title" }, item.title),
@@ -513,6 +563,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   categorySelect.addEventListener("change", () => { categoryTouched = true; });
   let autoLocation = null; // what we filled in, so a later pick can replace it
   let autoLink = null;
+  let picked = null; // the place picked from suggestions, saved with the plan for the info panel
 
   // Typing a place suggests real ones in the trip's country, and fills in the rest of the form.
   const placeBox = autocomplete(titleInput, {
@@ -533,6 +584,8 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       }
       if (!linkInput.value.trim() || linkInput.value === autoLink) linkInput.value = autoLink = mapsLink(p);
       if (p.category && !categoryTouched) categorySelect.value = p.category;
+      picked = p.osm ? { osm: p.osm, lat: p.lat, lon: p.lon, kind: p.kind, area: p.area } : null;
+      if (activeInfo?.isConnected) fillInfo(activeInfo, { ...item, title: p.name, category: categorySelect.value, place: picked }, trip, days);
     },
   });
 
@@ -565,6 +618,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     onSave({
       ...item,
       title,
+      place: picked ?? (title === item.title ? item.place : undefined),
       category: String(f.get("category")),
       date: String(f.get("date") ?? ""),
       time: String(f.get("time") ?? ""),
@@ -576,6 +630,101 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     });
   });
   return form;
+}
+
+/* ----- place info panel ----- */
+
+const settled = new WeakMap(); // promise -> { value } once done, so re-renders don't flash "Loading"
+const track = (p) => { p.then((value) => settled.set(p, { value }), () => settled.set(p, { error: true })); return p; };
+let activeInfo = null; // the panel on screen, so picking a suggestion can preview it
+
+const KIND_LABELS = { "tourism=attraction": "Attraction", "amenity=place_of_worship": "Place of worship", "aeroway=aerodrome": "Airport" };
+const kindLabel = (kind) => {
+  if (!kind) return "";
+  if (KIND_LABELS[kind]) return KIND_LABELS[kind];
+  const v = kind.includes("=") ? kind.split("=")[1] : kind;
+  return v.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+};
+
+function infoPanel(item, trip, days) {
+  const box = h("div", { class: "info card", "aria-live": "polite" });
+  activeInfo = box;
+  fillInfo(box, item, trip, days);
+  return box;
+}
+
+function fillInfo(box, item, trip, days) {
+  box.dataset.item = item?.id ?? "";
+  if (!item) {
+    box.replaceChildren(h("div", { class: "info-body" },
+      h("h2", null, "Place info"),
+      h("p", { class: "small muted" }, "Add a plan, then pick it in the itinerary to see opening hours, a short guide and crowd tips here.")));
+    return;
+  }
+  const country = getCountry(trip.country);
+  const infoP = track(getPlaceInfo({ title: item.title, place: item.place, countryCode: country?.code }));
+  const year = /^\d{4}/.test(item.date) ? item.date.slice(0, 4) : null;
+  const holP = track(getHolidays(country?.code, year));
+  const draw = () => {
+    if (box.dataset.item !== (item.id ?? "")) return; // a newer plan was selected meanwhile
+    const info = settled.get(infoP);
+    const hol = settled.get(holP);
+    box.replaceChildren(infoContent(item, trip, days, info, hol));
+  };
+  draw();
+  if (!settled.has(infoP) || !settled.has(holP)) Promise.allSettled([infoP, holP]).then(() => queueMicrotask(draw));
+}
+
+function infoContent(item, trip, days, info, hol) {
+  const data = info?.value ?? null;
+  const loading = !info;
+  const dayIdx = days.indexOf(item.date);
+  const when = [item.date ? (dayIdx >= 0 ? `Day ${dayIdx + 1} · ${formatDay(item.date)}` : formatDay(item.date)) : "Unscheduled", item.time].filter(Boolean).join(" · ");
+  const kind = data?.kind || item.place?.kind || "";
+  const section = (title, ...body) => h("section", { class: "info-sec" }, h("h3", null, title), ...body);
+  const extLink = (href, text) => h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text);
+  const maps = item.link?.startsWith("https://www.google.com/maps") ? item.link
+    : mapsLink({ name: data?.name || item.title, area: data?.area || item.location, country: getCountry(trip.country)?.name });
+
+  const note = hol ? dayNote(item.date, hol.value ?? null) : null;
+  const tip = crowdTip(kind, item.category);
+  const crowds = section("Busy times",
+    note && h("p", { class: `info-day ${note.busy ? "busy" : "quiet"}` }, note.text),
+    !item.date && h("p", { class: "small muted" }, "Give this plan a day to see if it falls on a weekend or public holiday."),
+    tip && h("p", { class: "small" }, h("span", { class: "muted" }, "General tip: "), tip),
+    h("p", { class: "small muted" }, "There's no free source of real peak hours for a place, so we don't guess. Google Maps shows ",
+      extLink(maps, "Popular times"), " for most places."));
+
+  return h("div", null,
+    data?.wiki?.image && h("img", { class: "info-img", src: data.wiki.image, alt: "", loading: "lazy", referrerpolicy: "no-referrer" }),
+    h("div", { class: "info-body" },
+      h("p", { class: "small muted" }, when),
+      h("h2", null, data?.name || item.title),
+      h("p", { class: "small muted" }, [data?.localName, kindLabel(kind), data?.area || item.location].filter(Boolean).join(" · ")),
+      loading && h("p", { class: "small muted info-loading" }, "Looking up this place…"),
+      info?.error && h("div", { class: "small" }, h("p", { class: "muted" }, "Couldn't load place info right now."),
+        h("button", { class: "btn", type: "button", onclick: () => render() }, "Try again")),
+      !loading && !info.error && !data && h("p", { class: "small muted" },
+        `We couldn't find "${item.title}" on the map. Edit the plan and pick it from the suggestions to get its info.`),
+      data?.wiki && h("div", { class: "info-wiki" },
+        h("p", { class: "info-extract" }, data.wiki.extract),
+        h("p", { class: "small" }, extLink(data.wiki.url, "Read more on Wikipedia"))),
+      data && section("Opening hours",
+        data.hours.length
+          ? h("ul", { class: "info-hours" }, data.hours.map((l) => h("li", null, l)))
+          : h("p", { class: "small muted" }, "Not listed in OpenStreetMap.", data.website ? " Check the official website below." : " Check the place's own website before you go."),
+        data.hours.length > 0 && h("p", { class: "small muted" }, "From OpenStreetMap, so it can be out of date.")),
+      data && (data.website || data.phone || data.fee) && section("Details",
+        h("ul", { class: "info-links" },
+          data.website && h("li", null, extLink(data.website, data.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""))),
+          data.phone && h("li", null, h("a", { href: `tel:${data.phone.split(/[;,]/)[0].replace(/[^\d+]/g, "")}` }, data.phone.split(";")[0])),
+          data.fee && h("li", null, data.fee === "yes" ? "Entry fee charged" : data.fee === "no" ? "Free entry" : `Fee: ${data.fee}`))),
+      crowds,
+      data?.guessed && h("p", { class: "small muted" }, "Matched by name. Wrong place? Edit the plan and pick the right one from the suggestions."),
+      h("p", { class: "small muted info-credit" }, "Info from ",
+        data?.osmUrl ? extLink(data.osmUrl, "OpenStreetMap") : "OpenStreetMap",
+        data?.wiki ? [" and ", extLink(data.wiki.url, "Wikipedia")] : "",
+        hol?.value ? ", holidays from Nager.Date" : "", ".")));
 }
 
 /* ----- budget ----- */

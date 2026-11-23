@@ -274,3 +274,55 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hint-inline { color: var(--good); } }
 :root[data-theme="dark"] .hint-inline { color: var(--good); }
 :root[data-theme="dark"] .ac-list { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+
+/* Trip page: place info | itinerary | budget */
+.trip-page .wrap { max-width: 1480px; }
+.trip-layout { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.trip-main { min-width: 0; container-type: inline-size; }
+.trip-info, .trip-budget { min-width: 0; }
+@media (min-width: 960px) {
+  .trip-layout { grid-template-columns: 300px minmax(0, 1fr); }
+  .trip-info { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; border-radius: var(--radius); }
+  .trip-budget { display: none; } /* no room for a third column yet */
+}
+@media (min-width: 1280px) {
+  .trip-layout { grid-template-columns: 320px minmax(0, 1fr) 260px; }
+  .trip-budget { display: block; grid-column: 3; grid-row: 1; position: sticky; top: 16px; }
+}
+.budget-soon { display: grid; gap: 8px; justify-items: start; border-style: dashed; background: transparent; }
+.budget-soon h2 { margin: 0; }
+/* The plan form adapts to the middle column's width, not the window's. */
+@container (max-width: 640px) {
+  .trip-main .form-grid.six { grid-template-columns: 1fr 1fr; }
+  .trip-main .span-1, .trip-main .span-2 { grid-column: span 1; }
+  .trip-main .span-3, .trip-main .span-4 { grid-column: 1 / -1; }
+}
+@container (max-width: 420px) {
+  .trip-main .form-grid.six { grid-template-columns: 1fr; }
+  .trip-main .span-1, .trip-main .span-2 { grid-column: 1 / -1; }
+}
+
+/* Selected plan */
+.item-wrap.selected .item { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* Place info panel */
+.info { overflow: hidden; }
+.info-img { display: block; width: 100%; height: 170px; object-fit: cover; background: var(--muted-bg); }
+.info-body { padding: 16px; display: grid; gap: 6px; }
+.info-body h2 { margin: 0; font-size: 1.15rem; }
+.info-sec { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.info-sec h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--subtle); }
+.info-extract { font-size: 0.88rem; display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; overflow: hidden; }
+.info-hours, .info-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 0.88rem; }
+.info-links a, .info a { color: var(--accent-strong); overflow-wrap: anywhere; }
+:root[data-theme="dark"] .info a { color: var(--good); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .info a { color: var(--good); } }
+.info-day { font-size: 0.85rem; padding: 6px 10px; border-radius: 8px; }
+.info-day.quiet { background: var(--accent-soft); }
+.info-day.busy { background: color-mix(in srgb, #f59e0b 16%, var(--surface)); }
+.info-loading { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .info-loading { animation: none; } }
+.info-credit { margin-top: 8px; }
+.info-inline { margin-top: 6px; }
+.info-inline .info { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }

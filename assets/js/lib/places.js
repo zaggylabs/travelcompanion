@@ -68,6 +68,7 @@ export function rankPlaces(features, query, limit = 8) {
       kind: String(p.osm_value ?? "").replace(/_/g, " "),
       category: categoryForPlace(p),
       lat, lon,
+      osm: p.osm_type && p.osm_id ? `${p.osm_type}${p.osm_id}` : "", // "W1282875870", for the info panel
       // Photon already ranks famous places first, so its top few results get a head start.
       score: weight + textBoost + Math.max(0, 4 - i) - i * 0.05,
     });
