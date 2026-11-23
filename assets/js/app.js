@@ -284,10 +284,72 @@ function tripView(trip) {
             onclick: () => { ui.tab = t; ui.editingItem = null; ui.attachOpen = null; render(); } }, t === "itinerary" ? "Itinerary" : "Budget"))),
         ui.tab === "itinerary" ? itineraryView(trip, days) : budgetView(trip, days)),
       h("aside", { class: "trip-budget", "aria-label": "Budget" },
-        h("div", { class: "card pad budget-soon" },
-          h("h2", null, "Budget"),
-          h("p", { class: "small muted" }, "A running budget for this trip will live here soon. For now, the Budget tab has the full breakdown."),
-          ui.tab !== "budget" && h("button", { class: "btn", type: "button", onclick: () => { ui.tab = "budget"; ui.editingItem = null; ui.attachOpen = null; render(); } }, "Open Budget tab")))));
+        budgetSummary(trip, days))));
+}
+
+/* ----- live budget summary (right column) ----- */
+
+let activeSummary = null; // { update(trip, draft) } for the summary on screen
+
+function budgetSummary(trip, days) {
+  const box = h("div", { class: "card summary", "aria-live": "polite" });
+  const update = (t, draft = false) => box.replaceChildren(...summaryContent(t, days, draft));
+  update(trip);
+  activeSummary = { box, update };
+  return box;
+}
+
+function summaryContent(trip, days, draft) {
+  const money = (n) => formatMoney(n, trip.currency);
+  const s = summarizeBudget(trip, days.length);
+  const toPay = Math.max(0, s.totalProjected - s.totalSpent);
+  const cats = s.categories.filter((c) => c.projected > 0 || c.spent > 0).sort((a, b) => b.projected - a.projected);
+  const hasBudget = s.totalBudget > 0;
+  const over = hasBudget && s.remaining < 0;
+  const pct = (v, of) => `${Math.min(100, of > 0 ? (v / of) * 100 : 0)}%`;
+
+  const dayRows = days.map((d, i) => ({ label: `Day ${i + 1}`, sub: formatDay(d).split(", ")[1] ?? d, v: s.byDay[d] ?? 0 }));
+  const daySet = new Set(days);
+  const otherDays = Object.entries(s.byDay).filter(([d, v]) => v > 0 && !daySet.has(d));
+  for (const [d, v] of otherDays.filter(([d]) => d).sort()) dayRows.push({ label: formatDay(d), sub: "", v });
+  if (s.byDay[""] > 0) dayRows.push({ label: "Unscheduled", sub: "", v: s.byDay[""] });
+  const maxDay = Math.max(1, ...dayRows.map((r) => r.v));
+
+  const goBudget = () => { ui.tab = "budget"; ui.editingItem = null; ui.attachOpen = null; render(); };
+
+  if (s.totalProjected === 0 && s.totalSpent === 0) {
+    return [h("div", { class: "summary-body" },
+      h("h2", null, "Budget"),
+      h("p", { class: "small muted" }, "Add a cost to any plan and your running total, spending by category and per-day costs show up here, updating as you go."))];
+  }
+
+  return [h("div", { class: "summary-body" },
+    h("div", { class: "summary-head" }, h("h2", null, "Budget"), draft && h("span", { class: "summary-draft small" }, "Includes unsaved changes")),
+    h("div", null,
+      h("p", { class: "small muted" }, "Expected total"),
+      h("p", { class: "summary-total num" }, money(s.totalProjected)),
+      h("p", { class: "small muted" }, `${money(s.projectedPerPerson)} per person`, s.projectedPerDay !== null ? ` · ${money(s.projectedPerDay)} per day` : "")),
+    h("div", { class: "summary-split" },
+      h("div", null, h("span", { class: "small muted" }, "Paid so far"), h("strong", { class: "num good" }, money(s.totalSpent))),
+      h("div", null, h("span", { class: "small muted" }, "Still to pay"), h("strong", { class: "num" }, money(toPay)))),
+    s.totalProjected > 0 && h("div", { class: "bar", title: `${Math.round((s.totalSpent / s.totalProjected) * 100)}% paid` }, h("div", { style: `width:${pct(s.totalSpent, s.totalProjected)}` })),
+    hasBudget && h("p", { class: `small ${over ? "bad strong" : "muted"}` },
+      over ? `${money(Math.abs(s.remaining))} over your ${money(s.totalBudget)} budget` : `${money(s.remaining)} left of your ${money(s.totalBudget)} budget`),
+    h("section", { class: "summary-sec" },
+      h("h3", null, "By category"),
+      h("ul", { class: "summary-list" }, cats.map((c) => h("li", null,
+        h("span", { class: "summary-row" },
+          h("span", null, h("i", { class: `dot cat-${c.category}` }), c.category),
+          h("span", { class: `num ${c.budget !== null && c.projected > c.budget ? "bad strong" : ""}` }, money(c.projected))),
+        h("span", { class: "bar thin" }, h("span", { class: `cat-${c.category}`, style: `width:${pct(c.projected, s.totalProjected)}` })),
+        c.spent > 0 && h("span", { class: "small muted" }, `${money(c.spent)} paid`))))),
+    dayRows.some((r) => r.v > 0) && h("section", { class: "summary-sec" },
+      h("h3", null, "By day"),
+      h("ul", { class: "summary-days" }, dayRows.map((r) => h("li", { class: r.v ? "" : "zero" },
+        h("span", null, r.label, r.sub && h("span", { class: "muted" }, ` ${r.sub}`)),
+        h("span", { class: "bar thin" }, h("span", { style: `width:${pct(r.v, maxDay)}` })),
+        h("span", { class: "num" }, r.v ? money(r.v) : "–"))))),
+    ui.tab !== "budget" && h("button", { class: "btn", type: "button", onclick: goBudget }, hasBudget ? "Budget limits" : "Set budget limits"))];
 }
 
 /** Itinerary order: trip days, then dates outside the trip, then unscheduled. */
@@ -608,6 +670,22 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       h("button", { class: "btn primary", type: "submit" }, "Save"),
       h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
       onDelete && h("button", { class: "btn danger push", type: "button", onclick: onDelete }, "Delete")));
+  // Typing a cost or changing the day updates the budget summary right away, before saving.
+  form.addEventListener("input", () => {
+    if (!activeSummary?.box.isConnected) return;
+    const f = new FormData(form);
+    const actualRaw = String(f.get("actualCost")).trim();
+    const draft = {
+      ...item,
+      category: String(f.get("category")),
+      date: String(f.get("date") ?? ""),
+      estimatedCost: Number(f.get("estimatedCost")) || 0,
+      actualCost: actualRaw === "" || Number.isNaN(Number(actualRaw)) ? null : Number(actualRaw),
+    };
+    const current = loadTrips().find((t) => t.id === trip.id) ?? trip;
+    const exists = current.items.some((i) => i.id === item.id);
+    activeSummary.update({ ...current, items: exists ? current.items.map((i) => (i.id === item.id ? draft : i)) : [...current.items, draft] }, true);
+  });
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const f = new FormData(form);
@@ -752,6 +830,7 @@ function budgetView(trip, days) {
       current = { ...current, budget };
       saveTrip(current);
       update();
+      if (activeSummary?.box.isConnected) activeSummary.update(current);
     });
     const r = {
       planned: h("td", { class: "r num" }),
