@@ -7,7 +7,7 @@ import { crowdTip, dayNote, getHolidays, getPlaceInfo } from "./lib/placeinfo.js
 import { GUIDES_CHECKED, SCHENGEN_NOTE, getGuide, homeAdviceLink, isSchengen, visaFor, visaOverviewLink, wikivoyageUrl } from "./lib/guides.js";
 import { getWikivoyage } from "./lib/wikivoyage.js";
 import { emergencyRows, getFacts, plugAdvice } from "./lib/countryfacts.js";
-import { DISCOVER_TYPES, RADII, discoverPlaces, discoverType, formatDistance, sortResults } from "./lib/discover.js";
+import { DIETS, DISCOVER_TYPES, RADII, discoverPlaces, discoverType, formatDistance, getDiet, hasDiets, sortResults } from "./lib/discover.js";
 import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
@@ -1620,7 +1620,7 @@ let discoverController = null;
 function discoverState(trip, days = daysBetween(trip.startDate, trip.endDate)) {
   if (ui.discover?.tripId !== trip.id) {
     ui.discover = {
-      tripId: trip.id, type: "food", radius: 1000, sort: "near", keyword: "", areaText: "", area: null, near: null,
+      tripId: trip.id, type: "food", diet: "", radius: 1000, sort: "near", keyword: "", areaText: "", area: null, near: null,
       status: "idle", results: null, resultType: null, error: null, cached: false, shown: PAGE, selected: null, scheduling: null,
       country: tripCountries(trip)[0] ?? "", // the country being searched: the day's, or the picked area's
     };
@@ -1734,10 +1734,11 @@ async function runDiscover(trip) {
       d.area = areaFrom(found, d.areaText);
       if (found.countryCode) d.country = found.countryCode;
     }
+    const diet = hasDiets(d.type) ? d.diet : "";
     const { results, cached, basic } = await discoverPlaces(
-      { type: d.type, lat: d.area.lat, lon: d.area.lon, radius: d.radius, keyword: d.keyword }, controller.signal);
+      { type: d.type, lat: d.area.lat, lon: d.area.lon, radius: d.radius, keyword: d.keyword, diet }, controller.signal);
     if (controller !== discoverController) return;
-    Object.assign(d, { status: "done", results, cached, basic, resultType: d.type });
+    Object.assign(d, { status: "done", results, cached, basic, resultType: d.type, resultDiet: diet });
   } catch (e) {
     if (controller.signal.aborted) return;
     Object.assign(d, { status: "error", error: e.userText ?? "Couldn't reach the free OpenStreetMap search just now. It may be busy, so try again in a minute." });
@@ -1783,6 +1784,17 @@ function discoverView(trip, days) {
       } },
     h("span", { "aria-hidden": "true" }, t.icon), " ", t.label)));
 
+  // Food and cafés: halal, vegetarian and so on.
+  const dietChips = hasDiets(d.type) && h("div", { class: "disc-diets", role: "group", "aria-label": "Dietary needs" },
+    h("span", { class: "small muted" }, "Dietary:"),
+    [{ key: "", label: "Any" }, ...DIETS].map((dt) =>
+      h("button", { type: "button", class: `chip small${d.diet === dt.key ? " active" : ""}`, "aria-pressed": String(d.diet === dt.key),
+        onclick: () => {
+          sync();
+          d.diet = dt.key;
+          if (d.areaText && d.status !== "idle") runDiscover(trip); else render();
+        } }, dt.label)));
+
   const stops = dayStops(trip, days);
   // Already know where you'll be? Show what's around there straight away.
   if (d.status === "idle" && d.areaText && !d.autoRan) { d.autoRan = true; queueMicrotask(() => runDiscover(trip)); }
@@ -1791,6 +1803,7 @@ function discoverView(trip, days) {
       h("h2", null, "Discover"),
       h("p", { class: "small muted" }, "Find places to eat, see and shop near anywhere on your trip. Save the ones you like, or add them straight to a day.")),
     typeChips,
+    dietChips,
     h("div", { class: "form-grid six" },
       field("Near", areaBox.el, "span-3"),
       field("Looking for (optional)", keywordInput, "span-2"),
@@ -1817,14 +1830,16 @@ function discoverResults(trip, days, d) {
       h("button", { class: "btn", type: "button", onclick: () => runDiscover(trip) }, "Try again"));
   }
   const type = discoverType(d.resultType);
+  const diet = getDiet(d.resultDiet);
   const list = sortResults(d.results, d.sort);
   const credit = h("p", { class: "small muted disc-credit" },
     "Places © ", h("a", { href: OSM_COPYRIGHT, target: "_blank", rel: "noopener" }, "OpenStreetMap contributors"),
     ". OpenStreetMap has no ratings or reviews, so we don't show any. Use the Reviews link to read them on Google Maps.");
   if (!list.length) {
     return h("div", { class: "stack" },
-      h("p", { class: "card pad center muted" }, `No ${type.label.toLowerCase()} ${d.keyword ? `matching "${d.keyword}" ` : ""}found within ${formatDistance(d.radius)} of ${d.area.label}.`,
-        d.radius < 2000 ? " Try a bigger distance" : " Try another area", d.keyword ? " or clear the keyword." : "."),
+      h("p", { class: "card pad center muted" }, `No ${diet ? `${diet.label.toLowerCase()} ` : ""}${type.label.toLowerCase()} ${d.keyword ? `matching "${d.keyword}" ` : ""}found within ${formatDistance(d.radius)} of ${d.area.label}.`,
+        d.radius < 2000 ? " Try a bigger distance" : " Try another area", d.keyword ? " or clear the keyword." : ".",
+        diet ? ` Many places don't say in OpenStreetMap whether they're ${diet.label.toLowerCase()}, so try searching "${diet.label.toLowerCase()}" on Google Maps too.` : ""),
       credit);
   }
   const selected = selectedResult(trip);
@@ -1836,14 +1851,16 @@ function discoverResults(trip, days, d) {
       h("p", { class: "small muted" }, `${plural(list.length, "place")} within ${formatDistance(d.radius)} of `, h("strong", null, d.area.label)),
       sortSelect),
     d.basic && h("p", { class: "hint small" }, "The detailed OpenStreetMap search is busy right now, so this is a simpler list without cuisines or opening hours",
-      d.keyword ? `, matching "${d.keyword}" by name only` : "", ". Pick a place to see its details, or ",
+      diet ? `, with only places that have "${diet.label.toLowerCase()}" in their name, so it's likely missing some` : d.keyword ? `, matching "${d.keyword}" by name only` : "", ". Pick a place to see its details, or ",
       h("button", { class: "linkish", type: "button", onclick: () => runDiscover(trip) }, "search again"), " in a minute."),
+    diet && !d.basic && h("p", { class: "hint small" },
+      `These are places OpenStreetMap lists as ${diet.label.toLowerCase()} or with ${diet.label.toLowerCase()} options, or with it in their name. Many places don't say, so the list is likely incomplete${list.length < 5 && d.radius < 2000 ? ". Try a bigger distance for more" : ""}. Always check with the place before you go.`),
     h("ul", { class: "items" }, list.slice(0, d.shown).map((r) => h("li", null,
       discoverRow(r, trip, days, d, type, selected?.osm === r.osm),
       d.scheduling === r.osm && schedulePanel(r.name, days, (date, time) => {
         const current = loadTrips().find((t) => t.id === trip.id);
         if (!current) return;
-        const item = { ...emptyItem(date), time, title: r.name, location: d.area.label, category: type.category, link: resultLink(r, d, trip), place: resultPlace(r, d) };
+        const item = { ...emptyItem(date), time, title: r.name, location: d.area.label, category: type.category, link: resultLink(r, d, trip), place: resultPlace(r, d), notes: dietNote(r) };
         saveTrip({ ...current, items: [...current.items, withCurrency(item, planCurrency(current, d.country), current)] });
         d.scheduling = null;
       }, () => { d.scheduling = null; }),
@@ -1853,6 +1870,8 @@ function discoverResults(trip, days, d) {
     credit);
 }
 
+const dietNote = (r) => (r.diets ?? []).map((x) => x.label).join(", ");
+
 function discoverRow(r, trip, days, d, type, selected) {
   const saved = (trip.ideas ?? []).find((i) => i.place?.osm === r.osm);
   const plans = trip.items.filter((i) => i.place?.osm === r.osm);
@@ -1861,7 +1880,7 @@ function discoverRow(r, trip, days, d, type, selected) {
   const save = () => {
     if (saved) return;
     updateIdeas(trip.id, (list) => [...list, {
-      ...emptyIdea(type.group), title: r.name, location: d.area.label, link: resultLink(r, d, trip), place: resultPlace(r, d),
+      ...emptyIdea(type.group), title: r.name, location: d.area.label, link: resultLink(r, d, trip), place: resultPlace(r, d), notes: dietNote(r),
     }]);
     render();
   };
@@ -1878,6 +1897,7 @@ function discoverRow(r, trip, days, d, type, selected) {
         h("span", { class: "item-meta" },
           h("span", null, [r.cuisine || r.kind, r.cuisine && r.kind !== "Restaurant" ? r.kind : ""].filter(Boolean).join(" · ")),
           r.localName && h("span", null, r.localName),
+          (r.diets ?? []).map((x) => h("span", { class: "diet-badge" }, x.label)),
           hours.length > 0 && h("span", { title: hours.join("\n") }, `🕒 ${hours[0]}${hours.length > 1 ? " …" : ""}`)),
         h("span", { class: "item-meta disc-links" },
           h("a", { href: resultLink(r, d, trip), target: "_blank", rel: "noopener noreferrer" }, "Reviews and map ↗"),

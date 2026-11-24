@@ -24,7 +24,7 @@ Plain static site: no build step, no API keys. The only server code is one Cloud
 | `regions.js` | Popular cities and areas; trip countries and cities; each day's base city/area and country (`tripCountries`, `cityCountry`, `dayBase`, `dayCountry`) |
 | `places.js` | Photon place search and ranking (`searchPlaces` takes one country or a list), Google Maps links |
 | `placeinfo.js` | Place info panel data: OSM tags, Wikipedia summary, public holidays, crowd tips |
-| `discover.js` | Discover tab: Overpass queries, Photon fallback, distance, sort, cache |
+| `discover.js` | Discover tab: Overpass queries, dietary filters (`DIETS`, `dietsOf`; food and cafés only), Photon fallback, distance, sort, cache |
 | `travel.js` | Flight / transport plans: modes, titles, times, and `arrivals()` (where travel lands you, used by `dayBase`) |
 | `ideas.js` | Saved places groups, turning a saved place into a plan |
 | `pagemeta.js` | Reads Open Graph tags and schema.org JSON-LD from raw HTML (used by the function) |

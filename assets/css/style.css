@@ -440,6 +440,10 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 .chip:hover { background: var(--muted-bg); }
 .chip.active { border-color: var(--accent); background: var(--accent-soft); }
 .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.disc-diets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.diet-badge { padding: 0 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+:root[data-theme="dark"] .diet-badge { color: var(--good); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .diet-badge { color: var(--good); } }
 .disc-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .disc-head p { margin: 0; }
 .disc-head select { width: auto; }

@@ -20,7 +20,7 @@ const CACHE_MAX = 10; // a busy area is ~60 KB, so this stays well clear of the 
  */
 export const DISCOVER_TYPES = [
   { key: "food", photon: "amenity:restaurant amenity:fast_food amenity:food_court", label: "Food", icon: "🍜", group: "Food", category: "Food", cuisine: true,
-    filters: ['["amenity"~"^(restaurant|fast_food|food_court)$"]'], placeholder: "ramen, sushi, halal…" },
+    filters: ['["amenity"~"^(restaurant|fast_food|food_court)$"]'], placeholder: "ramen, sushi…" },
   { key: "cafes", photon: "amenity:cafe amenity:ice_cream shop:bakery shop:pastry shop:confectionery", label: "Cafés and desserts", icon: "☕", group: "Food", category: "Food", cuisine: true,
     filters: ['["amenity"~"^(cafe|ice_cream)$"]', '["shop"~"^(bakery|pastry|confectionery)$"]'], placeholder: "matcha, bakery…" },
   { key: "bars", photon: "amenity:bar amenity:pub amenity:biergarten", label: "Bars", icon: "🍸", group: "Food", category: "Food", cuisine: false,
@@ -38,6 +38,23 @@ export const DISCOVER_TYPES = [
     placeholder: "market, books…" },
 ];
 const BY_KEY = Object.fromEntries(DISCOVER_TYPES.map((t) => [t.key, t]));
+
+/**
+ * Dietary filters for food and cafés. OSM tags them as diet:halal=yes (has options) or =only
+ * (everything is); few places are tagged, so a name or cuisine with the word counts too.
+ * `tags` are the diet tags that count (a vegan place has vegetarian food too).
+ */
+export const DIETS = [
+  { key: "halal", label: "Halal", tags: ["diet:halal"], words: "halal" },
+  { key: "vegetarian", label: "Vegetarian", tags: ["diet:vegetarian", "diet:vegan"], words: "vegetarian|veggie|vegan" },
+  { key: "vegan", label: "Vegan", tags: ["diet:vegan"], words: "vegan" },
+  { key: "kosher", label: "Kosher", tags: ["diet:kosher"], words: "kosher" },
+  { key: "gluten_free", label: "Gluten-free", tags: ["diet:gluten_free"], words: "gluten[ _-]?free" },
+];
+const DIET_BY_KEY = Object.fromEntries(DIETS.map((d) => [d.key, d]));
+export const getDiet = (key) => DIET_BY_KEY[key] ?? null;
+const DIET_TYPES = new Set(["food", "cafes"]);
+export const hasDiets = (type) => DIET_TYPES.has(type);
 export const discoverType = (key) => BY_KEY[key] ?? DISCOVER_TYPES[0];
 
 /** A keyword made safe to put inside an Overpass regex: letters, digits, spaces and hyphens only. */
@@ -46,17 +63,27 @@ export function cleanKeyword(s) {
 }
 
 /** The Overpass QL query for a type around a point. */
-export function buildQuery({ type, lat, lon, radius, keyword }) {
+export function buildQuery({ type, lat, lon, radius, keyword, diet }) {
   const t = discoverType(type);
   const r = Math.min(Math.max(Number(radius) || 1000, 100), 2000);
   const at = `(around:${r},${Number(lat).toFixed(5)},${Number(lon).toFixed(5)})`;
   const k = cleanKeyword(keyword);
   // OSM cuisine values use underscores ("japanese;ramen", "bubble_tea"), so a space matches either.
   const rx = k.replace(/ /g, "[ _]");
-  const all = `(\n${t.filters.map((f) => `  nwr${at}${f}["name"];`).join("\n")}\n)`;
-  // With a keyword, find everything of the type first, then match the name (or cuisine) within that.
-  const pick = !k ? `${all};` : `${all}->.c;\n(nwr.c["name"~"${rx}",i];${t.cuisine ? ` nwr.c["cuisine"~"${rx}",i];` : ""});`;
-  return `[out:json][timeout:25];\n${pick}\nout tags center ${MAX_RESULTS};`;
+  const lines = [`(\n${t.filters.map((f) => `  nwr${at}${f}["name"];`).join("\n")}\n)->.c;`];
+  let set = "c";
+  // A diet: the diet tag, or the word in the name or cuisine ("Halal Ramen", cuisine=vegan).
+  const dt = hasDiets(t.key) ? getDiet(diet) : null;
+  if (dt) {
+    lines.push(`(${dt.tags.map((tag) => `nwr.c["${tag}"~"^(yes|only)$"];`).join(" ")} nwr.c["name"~"${dt.words}",i]; nwr.c["cuisine"~"${dt.words}",i];)->.d;`);
+    set = "d";
+  }
+  // A keyword: match the name (or cuisine) within what's left.
+  if (k) {
+    lines.push(`(nwr.${set}["name"~"${rx}",i];${t.cuisine ? ` nwr.${set}["cuisine"~"${rx}",i];` : ""})->.k;`);
+    set = "k";
+  }
+  return `[out:json][timeout:25];\n${lines.join("\n")}\n.${set} out tags center ${MAX_RESULTS};`;
 }
 
 /** Metres between two points. */
@@ -99,6 +126,23 @@ export function resultKind(tags) {
   return { tag: "", label: "" };
 }
 
+/**
+ * What a place says about diets: [{ key, label }] with "Halal" when it's all halal (=only)
+ * or named/cuisine so, and "Halal options" when it has some (=yes).
+ */
+export function dietsOf(tags, name) {
+  const t = tags ?? {};
+  const text = `${name ?? t.name ?? ""} ${t["name:en"] ?? ""} ${t.cuisine ?? ""}`;
+  const out = [];
+  for (const d of DIETS) {
+    const own = t[d.tags[0]];
+    if (own === "only" || (!own && new RegExp(`\\b(${d.words})\\b`, "i").test(text))) out.push({ key: d.key, label: d.label });
+    else if (own === "yes") out.push({ key: d.key, label: `${d.label} options` });
+  }
+  // "Vegan" already says vegetarian.
+  return out.some((x) => x.key === "vegan" && !x.label.includes("options")) ? out.filter((x) => x.key !== "vegetarian") : out;
+}
+
 /** How much is listed about a place (for "Most info first"). Not a rating. */
 export function infoScore(tags) {
   const t = tags ?? {};
@@ -130,6 +174,7 @@ export function parseResults(elements, center) {
       cuisine: prettyCuisine(t.cuisine),
       hours: t.opening_hours ?? "",
       website: t.website || t["contact:website"] || "",
+      diets: dietsOf(t, t.name),
       lat, lon,
       distance: center ? distanceM(center, { lat, lon }) : null,
       score: infoScore(t),
@@ -152,14 +197,16 @@ export function parsePhoton(features, center, radius) {
     if (seen.has(key)) continue;
     seen.add(key);
     const kind = resultKind({ [p.osm_key]: p.osm_value });
-    out.push({ osm: `${p.osm_type}${p.osm_id}`, name: p.name, localName: "", kind: kind.label, kindTag: kind.tag, cuisine: "", hours: "", website: "", lat, lon, distance, score: 0 });
+    out.push({ osm: `${p.osm_type}${p.osm_id}`, name: p.name, localName: "", kind: kind.label, kindTag: kind.tag, cuisine: "", hours: "", website: "", diets: dietsOf({}, p.name), lat, lon, distance, score: 0 });
   }
   return out.sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
 }
 
-export function photonUrl({ type, lat, lon, radius, keyword }) {
+export function photonUrl({ type, lat, lon, radius, keyword, diet }) {
   const t = discoverType(type);
-  const k = cleanKeyword(keyword);
+  // Photon only searches names, so a diet becomes its word ("halal"); the keyword is checked afterwards.
+  const dt = hasDiets(t.key) ? getDiet(diet) : null;
+  const k = dt ? dt.words.split("|")[0].replace(/\[.*$/, "") : cleanKeyword(keyword);
   const params = new URLSearchParams({ lat: String(lat), lon: String(lon), limit: "50", lang: "en" });
   for (const tag of t.photon.split(" ")) params.append("osm_tag", tag);
   if (!k) {
@@ -186,8 +233,8 @@ const writeCache = (c) => {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(c)); } catch { try { localStorage.removeItem(CACHE_KEY); } catch { /* blocked */ } }
 };
 
-export function cacheKey({ type, lat, lon, radius, keyword }) {
-  return [type, Number(lat).toFixed(4), Number(lon).toFixed(4), radius, cleanKeyword(keyword).toLowerCase()].join("|");
+export function cacheKey({ type, lat, lon, radius, keyword, diet }) {
+  return [type, Number(lat).toFixed(4), Number(lon).toFixed(4), radius, cleanKeyword(keyword).toLowerCase(), hasDiets(type) && getDiet(diet) ? diet : ""].join("|");
 }
 
 /**
@@ -229,7 +276,10 @@ export async function discoverPlaces(params, signal) {
     const res = await fetch(photonUrl(params), { signal: signal ?? AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`Search failed (${res.status})`);
     const data = await res.json();
-    return { results: parsePhoton(data.features, { lat: params.lat, lon: params.lon }, params.radius), cached: false, basic: true };
+    let results = parsePhoton(data.features, { lat: params.lat, lon: params.lon }, params.radius);
+    const k = cleanKeyword(params.keyword).toLowerCase();
+    if (k && hasDiets(params.type) && getDiet(params.diet)) results = results.filter((r) => r.name.toLowerCase().includes(k));
+    return { results, cached: false, basic: true };
   } catch (e) {
     if (signal?.aborted) throw e;
     throw lastError ?? e;

@@ -1,7 +1,7 @@
 // Discover tab. Run with: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildQuery, cacheKey, cleanKeyword, distanceM, formatDistance, infoScore, parsePhoton, parseResults, photonUrl, prettyCuisine, sortResults } from "../assets/js/lib/discover.js";
+import { buildQuery, dietsOf, cacheKey, cleanKeyword, distanceM, formatDistance, infoScore, parsePhoton, parseResults, photonUrl, prettyCuisine, sortResults } from "../assets/js/lib/discover.js";
 
 test("keywords can't break out of the Overpass query", () => {
   assert.equal(cleanKeyword('ramen"];out;'), "ramen out");
@@ -55,7 +55,9 @@ test("Overpass results become a de-duplicated list, nearest first", () => {
 test("small helpers", () => {
   assert.equal(prettyCuisine("bubble_tea"), "Bubble tea");
   assert.equal(prettyCuisine(""), "");
-  assert.equal(cacheKey({ type: "food", lat: 1.234567, lon: 2, radius: 500, keyword: " Ramen " }), "food|1.2346|2.0000|500|ramen");
+  assert.equal(cacheKey({ type: "food", lat: 1.234567, lon: 2, radius: 500, keyword: " Ramen " }), "food|1.2346|2.0000|500|ramen|");
+  assert.equal(cacheKey({ type: "food", lat: 1, lon: 2, radius: 500, keyword: "", diet: "halal" }), "food|1.0000|2.0000|500||halal");
+  assert.equal(cacheKey({ type: "sights", lat: 1, lon: 2, radius: 500, keyword: "", diet: "halal" }), "sights|1.0000|2.0000|500||");
 });
 
 test("when Overpass is busy, Photon gives a basic list in the same shape", () => {
@@ -72,4 +74,20 @@ test("when Overpass is busy, Photon gives a basic list in the same shape", () =>
     { geometry: { coordinates: [139.7, 35.70] }, properties: { name: "Too far", osm_type: "N", osm_id: 6, osm_key: "amenity", osm_value: "restaurant" } },
   ], { lat: 35.66, lon: 139.7 }, 1000);
   assert.deepEqual(res.map((r) => [r.osm, r.name, r.kind]), [["N5", "Ramen Nagi", "Fast food"]]);
+});
+
+test("dietary filters: tags, names and cuisines count, and only for food and cafés", () => {
+  const q = buildQuery({ type: "food", lat: 1, lon: 2, radius: 1000, keyword: "ramen", diet: "halal" });
+  assert.match(q, /nwr\.c\["diet:halal"~"\^\(yes\|only\)\$"\]; nwr\.c\["name"~"halal",i\]; nwr\.c\["cuisine"~"halal",i\];\)->\.d;/);
+  assert.match(q, /\(nwr\.d\["name"~"ramen",i\]; nwr\.d\["cuisine"~"ramen",i\];\)->\.k;\n\.k out/);
+  assert.match(buildQuery({ type: "food", lat: 1, lon: 2, radius: 1000, diet: "vegetarian" }), /"diet:vegetarian".*"diet:vegan"/);
+  assert.doesNotMatch(buildQuery({ type: "sights", lat: 1, lon: 2, radius: 1000, diet: "halal" }), /halal/);
+  assert.deepEqual(dietsOf({ "diet:halal": "yes" }, "Ichiran"), [{ key: "halal", label: "Halal options" }]);
+  assert.deepEqual(dietsOf({ "diet:halal": "only" }, "Naritaya"), [{ key: "halal", label: "Halal" }]);
+  assert.deepEqual(dietsOf({ cuisine: "vegan" }, "T's Tantan"), [{ key: "vegan", label: "Vegan" }]);
+  assert.deepEqual(dietsOf({}, "Gluten-Free Bakery"), [{ key: "gluten_free", label: "Gluten-free" }]);
+  assert.deepEqual(dietsOf({ "diet:halal": "no" }, "Halal Corner"), []);
+  assert.deepEqual(dietsOf({}, "Ramen Nagi"), []);
+  const p = new URL(photonUrl({ type: "food", lat: 1, lon: 2, radius: 1000, keyword: "ramen", diet: "halal" }));
+  assert.equal(p.searchParams.get("q"), "halal");
 });
