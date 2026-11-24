@@ -7,7 +7,8 @@ Live: https://travelcompanion.pages.dev
 
 ## What it does
 
-- **Trips** have a country, the cities or areas you're visiting, dates, a currency and a number of travelers. Picking the country sets the currency for you (Japan → JPY), and you can still change it.
+- **Guided trip setup:** four short steps. *Where are you going?* (pick the country, which sets the currency: Japan → JPY), *Which cities?* (tap popular ones like *+ Tokyo* or search any city or town in that country), *When?* (dates), then the trip name (it defaults to "Japan trip"), currency and travelers.
+- **Where you are each day:** every day on the itinerary has a 📍 button. Pick the day's city from the trip's cities, then an area (popular ones like *Shibuya* or *Gion* are one tap, or search any neighbourhood, station or landmark near the city). Days you don't set stay in the last city you picked, and one-city trips are in that city every day. Discover opens on the day's area with *Your days* shortcuts (*Day 2–3 · Tokyo*), and place suggestions in a day's plans favour spots near where you are that day. Older trips keep working: their cities are read from the old destination text.
 - **Place suggestions:** when you add a plan, typing a name (say *Disney*) suggests real places in the trip's country (*Tokyo Disneyland, Urayasu*). Picking one fills in where it is, a Google Maps link and a likely category. Suggestions come from [Photon](https://photon.komoot.io), a free search over OpenStreetMap data, asked at most once per pause in typing.
 - **Place info (left column):** click a plan to see what's known about its place: a photo and summary from Wikipedia, opening hours, website and phone from OpenStreetMap, and whether the day is a weekend or public holiday (from [Nager.Date](https://date.nager.at)). Click it again, or the pencil, to edit. There's no free source of real peak hours, so the panel gives a general tip for that kind of place and links to Google Maps' Popular times instead of guessing. On narrow screens the info opens under the selected plan. The right column is reserved for the budget.
 - **Home currency:** on the first visit you say where you're from (guessed from the browser's time zone or language), and every cost entered in the trip's currency also shows what it comes to in your home currency (*¥10,900 ≈ S$94.45*): plans, day totals, the budget summary and the Budget tab. Change it any time with the *Home* button in the header. Rates come from [ExchangeRate-API's open endpoint](https://www.exchangerate-api.com/docs/free) (Frankfurter as a fallback), are cached in the browser for 12 hours, and the last saved rates keep working offline.
@@ -33,6 +34,7 @@ assets/js/lib/           Plain logic with no DOM, unit tested
   constants.js           Categories, ids
   countries.js           Countries, their currencies and flags
   places.js              Place search (Photon) and ranking
+  regions.js             Trip cities, popular cities and areas, where each day is based
   ideas.js               Saved places: groups, and turning one into a plan
   discover.js            Discover tab: Overpass queries, results, distance, cache
   placeinfo.js           Place info panel data (OSM, Wikipedia, public holidays)

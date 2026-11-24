@@ -43,15 +43,37 @@ export function categoryForPlace(p) {
 
 const norm = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-/** Photon GeoJSON -> ranked, de-duplicated suggestions. */
-export function rankPlaces(features, query, limit = 8) {
+const rad = Math.PI / 180;
+/** Distance in km between two { lat, lon } points. */
+export function distanceKm(a, b) {
+  const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(x));
+}
+
+/** Extra points for being close to where you'll be that day. */
+export function nearBoost(km) {
+  if (!Number.isFinite(km)) return 0;
+  return km <= 3 ? 4 : km <= 10 ? 3 : km <= 30 ? 2 : km <= 80 ? 1 : 0;
+}
+
+// Cities, towns, districts and neighbourhoods: what the city and area pickers want.
+const isSettlement = (p) => p.osm_key === "place" || (p.osm_key === "boundary" && p.osm_value === "administrative");
+
+/**
+ * Photon GeoJSON -> ranked, de-duplicated suggestions.
+ * opts.near ({ lat, lon }) favours places close to it; opts.only "settlement" keeps cities, towns and districts.
+ */
+export function rankPlaces(features, query, limit = 8, opts = {}) {
+  const near = opts.near && Number.isFinite(opts.near.lat) ? opts.near : null;
   const q = norm(query).trim();
   const seen = new Set();
   const out = [];
   (features ?? []).forEach((f, i) => {
     const p = f.properties ?? {};
     if (!p.name) return;
-    const weight = placeWeight(p);
+    if (opts.only === "settlement" && !isSettlement(p)) return;
+    const weight = opts.only === "settlement" && p.osm_key !== "place" ? 5 : placeWeight(p);
     if (weight === 0) return;
     const area = [...new Set([p.district, p.city, p.state].filter((x) => x && x !== p.name))].slice(0, 2).join(", ");
     const key = `${norm(p.name)}|${norm(p.city || p.state)}`;
@@ -60,6 +82,7 @@ export function rankPlaces(features, query, limit = 8) {
     const name = norm(p.name);
     const textBoost = name === q ? 3 : name.startsWith(q) ? 1.5 : name.split(/\s+/).some((w) => w.startsWith(q)) ? 1 : 0;
     const [lon, lat] = f.geometry?.coordinates ?? [];
+    const km = near && Number.isFinite(lat) ? distanceKm(near, { lat, lon }) : NaN;
     out.push({
       name: p.name,
       area,
@@ -70,7 +93,7 @@ export function rankPlaces(features, query, limit = 8) {
       lat, lon,
       osm: p.osm_type && p.osm_id ? `${p.osm_type}${p.osm_id}` : "", // "W1282875870", for the info panel
       // Photon already ranks famous places first, so its top few results get a head start.
-      score: weight + textBoost + Math.max(0, 4 - i) - i * 0.05,
+      score: weight + textBoost + Math.max(0, 4 - i) - i * 0.05 + nearBoost(km),
     });
   });
   return out.sort((a, b) => b.score - a.score).slice(0, limit);
@@ -84,21 +107,37 @@ export function mapsLink(place) {
 
 const cache = new Map();
 
-/** Search places in a country. Pass an AbortSignal so a newer keystroke cancels the old request. */
-export async function searchPlaces(query, countryCode, signal) {
+/**
+ * Search places in a country. Pass an AbortSignal so a newer keystroke cancels the old request.
+ * opts.near ({ lat, lon }) prefers places around that day's area; opts.only "settlement" for cities and districts.
+ */
+export async function searchPlaces(query, countryCode, signal, opts = {}) {
   const q = String(query ?? "").trim();
-  if (q.length < MIN_CHARS) return [];
-  const key = `${countryCode || ""}|${norm(q)}`;
+  if (q.length < (opts.minChars ?? MIN_CHARS)) return [];
+  const near = opts.near && Number.isFinite(opts.near.lat) ? opts.near : null;
+  const key = `${countryCode || ""}|${norm(q)}|${opts.only || ""}|${near ? `${near.lat.toFixed(2)},${near.lon.toFixed(2)}` : ""}`;
   if (cache.has(key)) return cache.get(key);
   const params = new URLSearchParams({ q, limit: "40", lang: "en" });
   if (countryCode) params.set("countrycode", countryCode.toUpperCase());
+  if (near) { params.set("lat", near.lat.toFixed(4)); params.set("lon", near.lon.toFixed(4)); }
   const res = await fetch(`${ENDPOINT}?${params}`, { signal });
   if (!res.ok) throw new Error(`Place search failed (${res.status})`);
   const data = await res.json();
-  const results = rankPlaces(data.features, q);
+  const results = rankPlaces(data.features, q, 8, { near, only: opts.only });
   cache.set(key, results);
   if (cache.size > 200) cache.delete(cache.keys().next().value);
   return results;
+}
+
+/** Find where a city or area is: { lat, lon } or null. Never throws. */
+export async function locatePlace(name, countryCode, { near, only, signal } = {}) {
+  try {
+    const found = await searchPlaces(name, countryCode, signal, { near, only, minChars: 2 });
+    const best = found.find((p) => near ? distanceKm(near, p) < 80 : true) ?? (near ? null : found[0]);
+    return best && Number.isFinite(best.lat) ? { lat: best.lat, lon: best.lon } : null;
+  } catch {
+    return null;
+  }
 }
 
 export const PLACE_MIN_CHARS = MIN_CHARS;
