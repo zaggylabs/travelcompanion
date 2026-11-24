@@ -1,13 +1,10 @@
-// Discover: find places near an area ("food near Shibuya") from OpenStreetMap, via the
-// free Overpass API, falling back to Photon (fewer details, but fast) when Overpass is busy. There are no ratings or reviews in OpenStreetMap, so results are
+// Discover: find places near an area ("food near Shibuya") from OpenStreetMap. Each search shows
+// a quick list from Photon straight away, then swaps in the detailed list (cuisine, hours, diets)
+// from Overpass when it arrives. There are no ratings or reviews in OpenStreetMap, so results are
 // sorted by distance (or by how much is listed about them) and never by made-up scores.
-// Fair use: one request per search (never per keystroke), a capped radius and result
-// count, and results cached in the browser for a week.
+// Fair use: one request each per search (never per keystroke), a capped radius and result
+// count, results cached at Cloudflare for a day and in the browser for a week.
 
-export const OVERPASS_ENDPOINTS = [
-  "https://overpass-api.de/api/interpreter",
-  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-];
 export const RADII = [500, 1000, 2000];
 export const MAX_RESULTS = 300; // asked from Overpass; the list shows 20 at a time
 const CACHE_KEY = "travelcompanion:discover-cache";
@@ -237,51 +234,48 @@ export function cacheKey({ type, lat, lon, radius, keyword, diet }) {
   return [type, Number(lat).toFixed(4), Number(lon).toFixed(4), radius, cleanKeyword(keyword).toLowerCase(), hasDiets(type) && getDiet(diet) ? diet : ""].join("|");
 }
 
-/**
- * Places of a type around a point. Resolves to { results, cached, basic }; `basic` means Overpass
- * was busy and these came from Photon, without cuisine or hours. Throws when everything failed.
- */
-export async function discoverPlaces(params, signal) {
-  const key = cacheKey(params);
-  const cache = readCache();
-  const hit = cache[key];
-  if (hit && Date.now() - hit.at < CACHE_TTL) return { results: hit.results, cached: true };
+const withSignal = (signal, ms) => {
+  const timeout = AbortSignal.timeout(ms);
+  return signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal ?? timeout;
+};
 
-  const body = new URLSearchParams({ data: buildQuery(params) });
-  let lastError = null;
-  // Overpass gets 10 seconds in all; after that a quick basic list beats a long wait.
-  const deadline = Date.now() + 10000;
-  for (const url of OVERPASS_ENDPOINTS) {
-    const left = deadline - Date.now();
-    if (left < 1500) break;
-    try {
-      const timeout = AbortSignal.timeout(left);
-      const res = await fetch(url, { method: "POST", body, signal: signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal ?? timeout });
-      if (!res.ok) { lastError = new Error(`Overpass ${res.status}`); continue; }
-      const data = await res.json(); // a busy server can answer with an HTML page, which lands in the catch
-      const results = parseResults(data.elements, { lat: params.lat, lon: params.lon });
-      const fresh = readCache();
-      fresh[key] = { at: Date.now(), results };
-      const keys = Object.keys(fresh).sort((a, b) => fresh[a].at - fresh[b].at);
-      while (keys.length > CACHE_MAX) delete fresh[keys.shift()];
-      writeCache(fresh);
-      return { results, cached: false, basic: false };
-    } catch (e) {
-      if (signal?.aborted) throw e;
-      lastError = e;
-    }
-  }
-  // Both Overpass servers are busy: Photon is quick and almost always up. Not cached, so the next search tries Overpass again.
-  try {
-    const res = await fetch(photonUrl(params), { signal: signal ?? AbortSignal.timeout(15000) });
-    if (!res.ok) throw new Error(`Search failed (${res.status})`);
-    const data = await res.json();
-    let results = parsePhoton(data.features, { lat: params.lat, lon: params.lon }, params.radius);
-    const k = cleanKeyword(params.keyword).toLowerCase();
-    if (k && hasDiets(params.type) && getDiet(params.diet)) results = results.filter((r) => r.name.toLowerCase().includes(k));
-    return { results, cached: false, basic: true };
-  } catch (e) {
-    if (signal?.aborted) throw e;
-    throw lastError ?? e;
-  }
+/** Detailed results saved in this browser for the search, or null. */
+export function cachedPlaces(params) {
+  const hit = readCache()[cacheKey(params)];
+  return hit && Date.now() - hit.at < CACHE_TTL ? hit.results : null;
+}
+
+/**
+ * The quick list, from Photon: usually back in under a second, but names only (no cuisine,
+ * hours or diet tags), so a diet becomes its word in the name.
+ */
+export async function quickPlaces(params, signal) {
+  const res = await fetch(photonUrl(params), { signal: withSignal(signal, 10000) });
+  if (!res.ok) throw new Error(`Search failed (${res.status})`);
+  const data = await res.json();
+  let results = parsePhoton(data.features, { lat: params.lat, lon: params.lon }, params.radius);
+  const k = cleanKeyword(params.keyword).toLowerCase();
+  if (k && hasDiets(params.type) && getDiet(params.diet)) results = results.filter((r) => r.name.toLowerCase().includes(k));
+  return results;
+}
+
+/**
+ * The detailed list, from Overpass through our own /api/discover (functions/api/discover.js),
+ * which tries the public servers and caches answers at Cloudflare for a day. Saved in this
+ * browser for a week. Throws when Overpass is too busy to answer.
+ */
+export async function detailedPlaces(params, signal) {
+  const q = new URLSearchParams({
+    type: params.type, lat: Number(params.lat).toFixed(4), lon: Number(params.lon).toFixed(4), radius: String(params.radius),
+    keyword: cleanKeyword(params.keyword), diet: hasDiets(params.type) && getDiet(params.diet) ? params.diet : "",
+  });
+  const res = await fetch(`/api/discover?${q}`, { signal: withSignal(signal, 16000) });
+  const data = await res.json().catch(() => null);
+  if (!data?.ok) throw new Error(data?.error ?? `Search failed (${res.status})`);
+  const fresh = readCache();
+  fresh[cacheKey(params)] = { at: Date.now(), results: data.results };
+  const keys = Object.keys(fresh).sort((a, b) => fresh[a].at - fresh[b].at);
+  while (keys.length > CACHE_MAX) delete fresh[keys.shift()];
+  writeCache(fresh);
+  return data.results;
 }

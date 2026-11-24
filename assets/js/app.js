@@ -7,7 +7,7 @@ import { crowdTip, dayNote, getHolidays, getPlaceInfo } from "./lib/placeinfo.js
 import { GUIDES_CHECKED, SCHENGEN_NOTE, getGuide, homeAdviceLink, isSchengen, visaFor, visaOverviewLink, wikivoyageUrl } from "./lib/guides.js";
 import { getWikivoyage } from "./lib/wikivoyage.js";
 import { emergencyRows, getFacts, plugAdvice } from "./lib/countryfacts.js";
-import { DIETS, DISCOVER_TYPES, RADII, discoverPlaces, discoverType, formatDistance, getDiet, hasDiets, sortResults } from "./lib/discover.js";
+import { DIETS, DISCOVER_TYPES, RADII, cachedPlaces, detailedPlaces, discoverType, quickPlaces, formatDistance, getDiet, hasDiets, sortResults } from "./lib/discover.js";
 import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
@@ -1741,10 +1741,34 @@ async function runDiscover(trip) {
       if (found.countryCode) d.country = found.countryCode;
     }
     const diet = hasDiets(d.type) ? d.diet : "";
-    const { results, cached, basic } = await discoverPlaces(
-      { type: d.type, lat: d.area.lat, lon: d.area.lon, radius: d.radius, keyword: d.keyword, diet }, controller.signal);
-    if (controller !== discoverController) return;
-    Object.assign(d, { status: "done", results, cached, basic, resultType: d.type, resultDiet: diet });
+    const params = { type: d.type, lat: d.area.lat, lon: d.area.lon, radius: d.radius, keyword: d.keyword, diet };
+    const meta = { resultType: d.type, resultDiet: diet };
+    const saved = cachedPlaces(params);
+    if (saved) {
+      Object.assign(d, { status: "done", results: saved, basic: false, upgrading: false }, meta);
+    } else {
+      // Ask for both at once: the quick list shows as soon as it's back, and the detailed one replaces it.
+      const detailed = detailedPlaces(params, controller.signal);
+      detailed.catch(() => {}); // handled below
+      const quick = quickPlaces(params, controller.signal).then((results) => {
+        if (controller !== discoverController || d.status === "done") return;
+        Object.assign(d, { status: "done", results, basic: true, upgrading: true }, meta);
+        if (ui.tab === "discover" && currentTripId() === trip.id) render();
+      }, () => {});
+      try {
+        const results = await detailed;
+        if (controller !== discoverController) return;
+        Object.assign(d, { status: "done", results, basic: false, upgrading: false }, meta);
+        if (d.selected && !results.some((r) => r.osm === d.selected)) d.selected = null;
+        if (d.scheduling && !results.some((r) => r.osm === d.scheduling)) d.scheduling = null;
+      } catch (e) {
+        if (controller.signal.aborted) return;
+        await quick;
+        if (controller !== discoverController) return;
+        if (d.status !== "done") throw e;
+        d.upgrading = false; // keep the quick list
+      }
+    }
   } catch (e) {
     if (controller.signal.aborted) return;
     Object.assign(d, { status: "error", error: e.userText ?? "Couldn't reach the free OpenStreetMap search just now. It may be busy, so try again in a minute." });
@@ -1829,7 +1853,10 @@ function discoverResults(trip, days, d) {
     return emptyState("🧭", "Let's go exploring", "Pick what you're after, type an area like a neighbourhood or station, and press Search.");
   }
   if (d.status === "loading") {
-    return h("p", { class: "card pad center muted info-loading" }, `Looking for ${discoverType(d.type).label.toLowerCase()} near ${d.area?.text === d.areaText ? d.area.name : d.areaText}…`);
+    return h("div", { class: "stack", "aria-busy": "true" },
+      h("p", { class: "small muted info-loading" }, `Looking for ${discoverType(d.type).label.toLowerCase()} near ${d.area?.text === d.areaText ? d.area.name : d.areaText}…`),
+      h("ul", { class: "items", "aria-hidden": "true" }, [0, 1, 2, 3].map(() => h("li", { class: "disc-skel" },
+        h("span", { class: "skel w60" }), h("span", { class: "skel w40" })))));
   }
   if (d.status === "error") {
     return h("div", { class: "card pad center" }, h("p", { class: "muted" }, d.error),
@@ -1856,7 +1883,8 @@ function discoverResults(trip, days, d) {
     h("div", { class: "disc-head" },
       h("p", { class: "small muted" }, `${plural(list.length, "place")} within ${formatDistance(d.radius)} of `, h("strong", null, d.area.label)),
       sortSelect),
-    d.basic && h("p", { class: "hint small" }, "The detailed OpenStreetMap search is busy right now, so this is a simpler list without cuisines or opening hours",
+    d.basic && d.upgrading && h("p", { class: "hint small info-loading" }, "Quick list first. Loading cuisines, opening hours and more…"),
+    d.basic && !d.upgrading && h("p", { class: "hint small" }, "The detailed OpenStreetMap search is busy right now, so this is a simpler list without cuisines or opening hours",
       diet ? `, with only places that have "${diet.label.toLowerCase()}" in their name, so it's likely missing some` : d.keyword ? `, matching "${d.keyword}" by name only` : "", ". Pick a place to see its details, or ",
       h("button", { class: "linkish", type: "button", onclick: () => runDiscover(trip) }, "search again"), " in a minute."),
     diet && !d.basic && h("p", { class: "hint small" },

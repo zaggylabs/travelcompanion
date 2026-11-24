@@ -1,7 +1,7 @@
 # Code map
 
 A short guide to where things are, so changes can start here instead of reading every file.
-Plain static site: no build step, no API keys. The only server code is one Cloudflare Pages Function (below). Cloudflare Pages serves the repo root and deploys every push to `main`.
+Plain static site: no build step, no API keys. The only server code is two Cloudflare Pages Functions (below). Cloudflare Pages serves the repo root and deploys every push to `main`.
 
 ## Files
 
@@ -13,6 +13,7 @@ Plain static site: no build step, no API keys. The only server code is one Cloud
 | `assets/js/autocomplete.js` | Suggestion dropdown used for countries and places |
 | `assets/js/theme.js` | Light/dark toggle (loaded before CSS) |
 | `assets/js/lib/*.js` | Logic with no DOM, unit tested in `tests/` |
+| `functions/api/discover.js` | Pages Function: `GET /api/discover?type&lat&lon&radius&keyword&diet` builds the Overpass query itself (no open proxy), tries overpass-api.de, then maps.mail.ru after 2.5 s and overpass.private.coffee after 5 s (first good answer wins, 14 s cap), returns parsed results, cached at the edge a day. The browser shows Photon's quick list first and swaps in this one |
 | `functions/api/link-preview.js` | Pages Function: `GET /api/link-preview?url=` fetches a booking page (allowlisted hosts only, follows share-link redirects, 8 s timeout, cached a day) and returns its name, address, rating, photo via `pagemeta.js`. Not served by `python3 -m http.server`. Tested 2026-11-24: Airbnb works; Booking.com (AWS WAF challenge), Agoda (no data in its HTML) and Klook (403) can't be read, so the app takes the name from the URL and matches it on the map with Photon |
 
 ### lib
@@ -24,7 +25,7 @@ Plain static site: no build step, no API keys. The only server code is one Cloud
 | `regions.js` | Popular cities and areas; trip countries and cities; each day's base city/area and country (`tripCountries`, `cityCountry`, `dayBase`, `dayCountry`) |
 | `places.js` | Photon place search and ranking (`searchPlaces` takes one country or a list), Google Maps links |
 | `placeinfo.js` | Place info panel data: OSM tags, Wikipedia summary, public holidays, crowd tips |
-| `discover.js` | Discover tab: Overpass queries, dietary filters (`DIETS`, `dietsOf`; food and cafés only), Photon fallback, distance, sort, cache |
+| `discover.js` | Discover tab: Overpass queries, dietary filters (`DIETS`, `dietsOf`; food and cafés only), `quickPlaces` (Photon) and `detailedPlaces` (/api/discover), distance, sort, browser cache |
 | `travel.js` | Flight / transport plans: modes, titles, times, and `arrivals()` (where travel lands you, used by `dayBase`) |
 | `ideas.js` | Saved places groups, turning a saved place into a plan |
 | `pagemeta.js` | Reads Open Graph tags and schema.org JSON-LD from raw HTML (used by the function) |
@@ -72,7 +73,8 @@ Older trips may lack `countries`, `cities`, a city's `country`, or `paid`. The h
 ## External services (all free, keyless)
 
 - Photon `photon.komoot.io`: place and city search
-- Overpass `overpass-api.de` (fallback `maps.mail.ru`): Discover
+- Overpass `overpass-api.de`, `maps.mail.ru`, `overpass.private.coffee` (via /api/discover): Discover details
+- Photon reverse/search: Discover's quick list
 - OSM API `api.openstreetmap.org`: place tags for the info panel
 - Wikipedia and Wikivoyage APIs: summaries and country tips
 - Nager.Date `date.nager.at`: public holidays
