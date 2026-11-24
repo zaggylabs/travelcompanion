@@ -771,6 +771,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .form-files .actions { flex-wrap: wrap; align-items: center; }
 .form-files .actions .btn { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
 .form-files .actions .btn svg { width: 16px; height: 16px; }
+.add-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .form-files.drop { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }
 
 /* Saved places sub-tabs and kind-specific forms */

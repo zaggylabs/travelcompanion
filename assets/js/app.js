@@ -342,6 +342,19 @@ function field(label, control, cls) {
   return h("label", { class: `field ${cls || ""}` }, h("span", null, label), control);
 }
 
+// Optional fields start folded behind small "+ Link" chips; one that already has something starts open.
+function foldable(parts) {
+  const chips = h("div", { class: "add-chips span-all" });
+  const draw = () => {
+    chips.replaceChildren(...parts.filter((p) => p.el.hidden).map((p) => h("button", { class: "chip small plain", type: "button",
+      onclick: () => { p.el.hidden = false; draw(); p.el.querySelector("input:not([type=file]), textarea, button")?.focus(); } }, `+ ${p.label}`)));
+    chips.hidden = !chips.childElementCount;
+  };
+  for (const p of parts) p.el.hidden = !p.open;
+  draw();
+  return [...parts.map((p) => p.el), chips];
+}
+
 const settlementRow = (p) => [
   h("span", { class: "ac-icon", "aria-hidden": "true" }, "📍"),
   h("span", { class: "ac-main" }, h("span", { class: "ac-title" }, p.name), h("span", { class: "ac-sub small muted" }, p.area)),
@@ -1758,7 +1771,8 @@ function ideaForm(idea, trip, days, { onSave, onCancel, onDelete, focus, isNew =
     field(kind.key === "Stays" ? "Hotel" : "Name", placeBox.el, "span-3"),
     field(kind.key === "Stays" ? "Address" : "Where", locationInput, "span-3"),
     ...extra.els,
-    field("Note", h("input", { name: "notes", placeholder: kind.key === "Food" ? "Optional, e.g. try the tonkotsu" : "Optional", value: idea.notes }), "span-all"),
+    foldable([{ label: "Note", open: Boolean(idea.notes?.trim()),
+      el: field("Note", h("input", { name: "notes", placeholder: kind.key === "Food" ? "Optional, e.g. try the tonkotsu" : "Optional", value: idea.notes }), "span-all") }]),
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, isNew ? "Save place" : "Save"),
       onCancel && h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
@@ -2601,9 +2615,10 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     isTravel ? travelFields : [dayField("span-2"), field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1")],
     costInput.el,
     field("Currency", currencySelect, "span-1"),
-    field("Link", linkInput, "span-all"),
-    field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"),
-    filesBox,
+    foldable([
+      { label: "Link", el: field("Link", linkInput, "span-all"), open: Boolean(item.link) },
+      { label: "Notes", el: field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"), open: Boolean(item.notes?.trim()) },
+      { label: "Attachment", el: filesBox, open: Boolean(item.attachments?.length || pending.length) }]),
     h("label", { class: "check span-all" }, paidBox, h("span", null, "Paid"), h("span", { class: "small muted" }, " · ticks it off the to-pay list on the right")),
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, "Save"),
