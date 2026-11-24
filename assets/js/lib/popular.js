@@ -19,9 +19,9 @@ export function popularQuery(lat, lon, radiusKm = POPULAR_RADIUS_KM) {
 } ORDER BY DESC(?links) LIMIT 400`;
 }
 
-const SKIP = /\b(special wards?|ward of|city in|town in|village in|municipality|prefecture|province|county|state of|capital|largest city|metropolitan|university|college|school|institute|company|corporation|manufacturer|retailer|brand|station|airport|olympic|paralympic|government|ministry|parliament|house of|council|court|bank|exchange|attack|incident|battle|war|massacre|disaster|earthquake|fire of|hospital|studio|network|television|radio|newspaper|broadcaster|operator|agency|embassy|consulate|library|subway|metro|railway|rail line|line\b|highway|expressway|road|business|financial|office|headquarters|hotel|apartment|residential|cemetery|club|team|federation|organi[sz]ation|association|former|historical name|empire|shogunate|dynasty|era\b|period|election|event|festival|award|film|album|song|novel|band|software|video game|person|politician|family|clan|research|laboratory|power plant|factory|prison|military|base\b|barracks|port of|electoral|constituency|district of the|census|neighbourhood of the city|church building)\b/i;
+const SKIP = /\b(special wards?|ward of|city in|town in|village in|municipality|prefecture|province|county|state of|capital|largest city|metropolitan|university|college|school|institute|company|corporation|manufacturer|retailer|brand|station|airport|olympic|paralympic|government|ministry|parliament|house of|council|court|bank|exchange|attack|incident|battle|war|massacre|disaster|earthquake|fire of|hospital|studio|network|television|radio|newspaper|broadcaster|operator|agency|embassy|consulate|library|subway|metro|railway|rail line|line\b|highway|expressway|road|business|financial|office|headquarters|hotel|apartment|residential|cemetery|club|team|federation|organi[sz]ation|association|former|historical name|empire|shogunate|dynasty|era\b|period|election|event|festival|award|film|album|song|novel|band|software|video game|person|politician|family|clan|research|laboratory|power plant|factory|prison|military|base\b|barracks|port of|electoral|constituency|district of the|census|neighbourhood of the city|church building|stock|market based|country|sovereign|main island|baseball|tower block)\b/i;
 const DO = /\b(theme park|amusement park|water ?park|zoo|aquarium|safari|museum|art gallery|gallery|planetarium|observation deck|observatory|onsen|hot springs?|ski resort|racecourse|cable car|aerial tramway|ropeway|funicular|ferris wheel|roller coaster|theatre|theater|opera house|concert hall|science cent(er|re)|cruise|night market)\b/i;
-const SEE = /\b(tower|temple|shrine|pagoda|castle|palace|fort(ress)?|gate|park|garden|square|plaza|bridge|market|shopping|mall|arcade|district|neighbo(u)?rhood|quarter|area in|town located|crossing|street|avenue|boulevard|monument|memorial|statue|landmark|cathedral|church|basilica|mosque|synagogue|chapel|abbey|monastery|island|beach|bay|mountain|peak|volcano|hill|lake|waterfall|river|canal|harbou?r|pier|wharf|old town|historic|heritage|ruins?|archaeological|viewpoint|skyscraper|lighthouse|residence|cave|reserve|national park|forest|valley|gorge|promenade)\b/i;
+const SEE = /\b(tower|temple|shrine|pagoda|castle|palace|fort(ress)?|gate|park|garden|square|plaza|bridge|market|shopping|mall|arcade|district|neighbo(u)?rhood|quarter|area in|town located|crossing|street|avenue|boulevard|monument|memorial|statue|landmark|cathedral|church|basilica|mosque|synagogue|chapel|abbey|monastery|island|beach|bay|mountain|peak|volcano|hill|lake|waterfall|canal|harbou?r|pier|wharf|old town|historic|heritage|ruins?|archaeological|viewpoint|skyscraper|lighthouse|residence|cave|reserve|national park|forest|valley|gorge|promenade)\b/i;
 
 /**
  * "theme park in Japan, owned by…" -> "do"; "Shinto shrine in Tokyo" -> "see"; "special ward of Tokyo" -> null.
@@ -56,7 +56,7 @@ export function parsePopular(bindings, center, limit = POPULAR_LIMIT) {
     const name = b.label?.value ?? "";
     const desc = b.desc?.value ?? "";
     if (!id || !name || seen.has(id) || seen.has(name.toLowerCase())) continue;
-    const kind = classify(desc);
+    const kind = /\b(government|ministry|headquarters|prefectural|city hall)\b/i.test(name) ? null : classify(desc);
     if (!kind) continue;
     const pt = parsePoint(b.coord?.value);
     if (!pt) continue;
@@ -64,8 +64,11 @@ export function parsePopular(bindings, center, limit = POPULAR_LIMIT) {
     seen.add(name.toLowerCase());
     const list = kind === "do" ? out.todo : out.see;
     if (list.length >= limit) continue;
+    // Big cities have dozens of famous museums; keep room for theme parks, zoos and the like.
+    const museum = /museum|gallery/i.test(desc);
+    if (museum && list.filter((x) => x.museum).length >= 5) continue;
     list.push({
-      id, name, desc: desc[0].toUpperCase() + desc.slice(1), links: Number(b.links?.value) || 0,
+      id, name, desc: desc[0].toUpperCase() + desc.slice(1), links: Number(b.links?.value) || 0, ...(museum ? { museum: true } : {}),
       lat: pt.lat, lon: pt.lon, distance: center ? distanceM(center, pt) : null, image: thumb(b.image?.value),
     });
   }

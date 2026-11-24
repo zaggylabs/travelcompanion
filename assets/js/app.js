@@ -1964,7 +1964,7 @@ function popularCenter(d) {
 function getPopular(c) {
   const key = `${c.lat.toFixed(2)},${c.lon.toFixed(2)}`;
   if (!popularCache.has(key)) {
-    const p = fetch(`/api/popular?lat=${c.lat.toFixed(2)}&lon=${c.lon.toFixed(2)}`, { signal: AbortSignal.timeout(25000) })
+    const p = fetch(`/api/popular?lat=${c.lat.toFixed(2)}&lon=${c.lon.toFixed(2)}&v=2`, { signal: AbortSignal.timeout(25000) })
       .then((r) => r.json())
       .then((data) => { if (!data?.ok) throw new Error(data?.error ?? "failed"); return data; });
     p.catch(() => popularCache.delete(key)); // try again next time

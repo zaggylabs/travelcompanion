@@ -16,7 +16,7 @@ export async function onRequestGet({ request, waitUntil }) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180 || !q.get("lat") || !q.get("lon")) return json({ ok: false, error: "bad-point" });
 
   const cache = caches.default;
-  const key = new Request(`https://popular.internal/v1?p=${lat},${lon}`);
+  const key = new Request(`https://popular.internal/v2?p=${lat},${lon}`);
   const hit = await cache.match(key);
   if (hit) return hit;
 
