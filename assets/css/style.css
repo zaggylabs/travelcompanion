@@ -568,7 +568,6 @@ form[data-mode="manual"] .link-field, form[data-mode="manual"] .details-label { 
 @container (max-width: 420px) { .idea-modes { grid-template-columns: 1fr; } }
 
 /* Flight / transport plans */
-.kind-switch { display: flex; flex-wrap: wrap; gap: 6px; }
 .travel-day { margin: -4px 0 6px; color: var(--accent); font-weight: 600; }
 .check.next-day { margin-top: -4px; }
 

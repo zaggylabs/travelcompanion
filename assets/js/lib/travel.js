@@ -25,8 +25,8 @@ export function travelTitle(t) {
 /** "08:40 → 15:50 (+1)" */
 export function travelTimes(item) {
   const t = item.travel ?? {};
-  if (!item.time && !t.arrive) return "";
-  return `${item.time || "?"} → ${t.arrive || "?"}${t.nextDay ? " (+1)" : ""}`;
+  if (!t.arrive) return item.time ? `departs ${item.time}` : "";
+  return `${item.time || "?"} → ${t.arrive}${t.nextDay ? " (+1)" : ""}`;
 }
 
 /** "2026-12-01" -> "2026-12-02" */

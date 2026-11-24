@@ -51,7 +51,7 @@ Plain static site: no build step, no API keys. The only server code is one Cloud
   budget: { Food: 300, ... },
   items: [{ id, date, time, title, location, category, estimatedCost, actualCost, paid,
             currency?,  // only when different from trip.currency
-            travel?: { mode: "flight|train|bus|ferry|car", from, to, number, arrive, nextDay },  // time = departure
+            travel?: { mode: "flight|train|bus|ferry|car", from, to, number, arrive, nextDay },  // Flights/Transport plans with a route; time = departure
             notes, link, place?: { osm, lat, lon, kind, area, cc? }, fromIdea?, attachments?: [...] }],
   ideas: [{ id, title, group, location, link, bookingLink?, details?: { address, area, rating, ratingScale, reviews, stars, image, price }, notes, place?, createdAt }] }  // a plan made from one gets bookingLink || link
 ```
