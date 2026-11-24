@@ -655,7 +655,7 @@ function tripView(trip) {
         infoPanel(ui.tab === "ideas" ? ideaAsItem(selectedIdea(trip)) : ui.tab === "discover" ? discoverAsItem(selectedResult(trip), trip) : selectedItem(trip, days), trip, days)),
       h("div", { class: "trip-main stack" },
         h("div", { class: "tabs", role: "tablist" }, Object.entries(TABS).map(([t, label]) =>
-          h("button", { role: "tab", type: "button", "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
+          h("button", { role: "tab", type: "button", "data-tab": t, "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
             onclick: () => { Object.assign(ui, { tab: t, editingItem: null, attachOpen: null, editingIdea: null, schedulingIdea: null }); render(); } },
             label, t === "ideas" && trip.ideas?.length ? h("span", { class: "tab-count num" }, trip.ideas.length) : null))),
         ui.tab === "guide" ? guideView(trip) : ui.tab === "budget" ? budgetView(trip, days) : ui.tab === "ideas" ? ideasView(trip, days)
@@ -1233,7 +1233,7 @@ function itemRow(item, trip, selected) {
 // Clicking a plan shows its place info; clicking it again (or the pencil) edits it.
 function itemButton(item, trip, selected) {
   return h("button", {
-    class: "item", type: "button", "aria-pressed": String(Boolean(selected)),
+    class: `item${item.travel ? " cat-line-Flights" : ` cat-line-${item.category}`}`, type: "button", "aria-pressed": String(Boolean(selected)),
     title: selected ? "Click again to edit" : "Show info about this place",
     onclick: () => {
       if (selected && ui.selectedItem === item.id) return editItem(item);
