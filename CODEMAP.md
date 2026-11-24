@@ -28,6 +28,7 @@ Plain static site: no build step, no API keys. The only server code is three Clo
 | `placeinfo.js` | Place info panel data: OSM tags, Wikipedia summary, public holidays, crowd tips |
 | `popular.js` | Discover's Popular column: Wikidata query, sorting descriptions into "do"/"see" (`classify`), thumbnails |
 | `discover.js` | Discover tab: Overpass queries, dietary filters (`DIETS`, `dietsOf`; food and cafés only), `quickPlaces` (Photon) and `detailedPlaces` (/api/discover), distance, sort, browser cache |
+| `airports.js` | Airport search for flight plans over `assets/data/airports.txt` (OurAirports, public domain; ~3,200 airports with scheduled flights, loaded on first use) |
 | `travel.js` | Flight / transport plans: modes, titles, times, and `arrivals()` (where travel lands you, used by `dayBase`) |
 | `ideas.js` | Saved places groups, turning a saved place into a plan |
 | `pagemeta.js` | Reads Open Graph tags and schema.org JSON-LD from raw HTML (used by the function) |
@@ -55,7 +56,7 @@ Plain static site: no build step, no API keys. The only server code is three Clo
   items: [{ id, date, time, title,   // title is free text ("Lunch at Ichiran"); place.name is the map place
             location, category, estimatedCost, actualCost, paid,  // the form has one Cost: saves estimatedCost, actualCost null; older plans' cost = actualCost ?? estimatedCost (expectedCost)
             currency?,  // only when different from trip.currency
-            travel?: { mode: "flight|train|bus|ferry|car", from, to, number, arrive, nextDay },  // Flights/Transport plans with a route; time = departure
+            travel?: { mode: "flight|train|bus|ferry|car", from, to, number, arrive, nextDay, fromAirport?, toAirport? (IATA), fromAirportName?, toAirportName? },  // Flights/Transport plans with a route; time = departure
             notes, link, place?: { name, osm?, lat, lon, kind, area, cc? }, fromIdea?, attachments?: [...] }],
   ideas: [{ id, title, group, location, link, bookingLink?, details?: { address, area, rating, ratingScale, reviews, stars, image, price }, notes, place?, createdAt }] }  // a plan made from one gets bookingLink || link
 ```

@@ -22,6 +22,9 @@ export function travelTitle(t) {
   return route ? `${head} · ${route}` : head;
 }
 
+/** "SIN → HND" when the airports are known. */
+export const airportRoute = (t) => (t?.fromAirport || t?.toAirport ? `${t.fromAirport || "?"} → ${t.toAirport || "?"}` : "");
+
 /** "08:40 → 15:50 (+1)" */
 export function travelTimes(item) {
   const t = item.travel ?? {};

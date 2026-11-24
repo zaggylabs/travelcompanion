@@ -15,7 +15,8 @@ import { browserGuess, convert, getRates, savedHome, saveHome } from "./lib/rate
 import { expectedCost, isPaid, itemCurrency, setPaid, summarizeBudget } from "./lib/budget.js";
 import { csvToItems, itemsToCsv } from "./lib/csv.js";
 import { parseBookingLink } from "./lib/booking.js";
-import { TRAVEL_MODES, routeText, travelMode, travelTimes, travelTitle } from "./lib/travel.js";
+import { airportCode, airportLabel, loadAirports, searchAirports } from "./lib/airports.js";
+import { TRAVEL_MODES, airportRoute, routeText, travelMode, travelTimes, travelTitle } from "./lib/travel.js";
 import { IDEA_GROUPS, emptyIdea, groupForPlace, groupIdeas, groupOf, ideaToItem } from "./lib/ideas.js";
 import { deleteTrip, loadTrips, saveTrip, STORAGE_KEY } from "./lib/store.js";
 import {
@@ -1247,7 +1248,7 @@ function itemButton(item, trip, selected) {
       h("span", { class: "item-title" }, item.title),
       h("span", { class: "item-meta" },
         item.travel
-          ? h("span", null, `${travelMode(item.travel.mode).icon} `, [item.travel.number, travelTimes(item)].filter(Boolean).join(" · ") || travelMode(item.travel.mode).label)
+          ? h("span", null, `${travelMode(item.travel.mode).icon} `, [item.travel.number, airportRoute(item.travel), travelTimes(item)].filter(Boolean).join(" · ") || travelMode(item.travel.mode).label)
           : h("span", null, h("i", { class: `dot cat-${item.category}` }), item.category),
         !item.travel && item.location && h("span", null, item.location),
         item.notes && h("em", null, item.notes),
@@ -2291,12 +2292,47 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   const groundMode = groundModes.some((m) => m.key === t.mode) ? t.mode : "train";
   const modeSelect = isFlight ? h("input", { type: "hidden", name: "mode", value: "flight" })
     : h("select", { name: "mode" }, groundModes.map((m) => h("option", { value: m.key, selected: m.key === groundMode }, `${m.icon} ${m.label}`)));
+  // Airports (flights only): type a code, city or name; home and the trip's countries come first.
+  const airportCountries = [home.country, ...ccs].filter(Boolean);
+  function airportField(name, label, code, nameKey, fullName, placeField) {
+    const input = h("input", { name, value: code ? `${fullName || ""} (${code})`.trim() : "", placeholder: name === "fromAirport" ? "e.g. Changi or SIN" : "e.g. Haneda or HND" });
+    const box = autocomplete(input, {
+      delay: 150,
+      search: async (q) => searchAirports(await loadAirports(), q, { countries: airportCountries }),
+      renderItem: (a) => [
+        h("span", { class: "ac-icon", "aria-hidden": "true" }, "✈"),
+        h("span", { class: "ac-main" }, h("span", { class: "ac-title" }, a.name), h("span", { class: "ac-sub small muted" }, [a.serves || a.city, getCountry(a.cc)?.name].filter(Boolean).join(", "))),
+        h("span", { class: "ac-tag num" }, a.code)],
+      onPick: (a) => {
+        input.value = airportLabel(a);
+        // Fill an empty From / To: a trip city if the airport serves one, else the country.
+        const place = form.querySelector(`input[name=${placeField}]`);
+        if (place && !place.value.trim()) {
+          const city = tripCities(trip).find((c) => sameName(c.name, a.serves || a.city));
+          place.value = city?.name ?? (a.cc === home.country ? getCountry(a.cc)?.name : null) ?? a.serves ?? a.city;
+        }
+      },
+      emptyText: () => "No airport matches that. Try the city or the 3-letter code.",
+    });
+    return field(label, box.el, "span-3");
+  }
+  const readAirports = (f) => {
+    const out = {};
+    for (const k of ["fromAirport", "toAirport"]) {
+      const text = String(f.get(k) ?? "").trim();
+      const code = airportCode(text);
+      if (code) { out[k] = code; out[`${k}Name`] = text.replace(/\s*\([A-Za-z]{3}\)\s*$/, "").trim(); }
+    }
+    return out;
+  };
   const travelFields = isTravel ? [
     // Home is always offered (it's usually where the first flight leaves from), then the trip's countries and cities.
     h("datalist", { id: placesList }, [...new Set([homeName, ...ccs.map((c) => getCountry(c)?.name), ...tripCities(trip).map((c) => c.name)].filter(Boolean))].map((n) => h("option", { value: n }))),
     isFlight ? modeSelect : field("By", modeSelect, "span-2"),
     field("From", h("input", { name: "from", list: placesList, value: t.from ?? "", placeholder: homeName ? `e.g. ${homeName}` : "e.g. Singapore" }), "span-2"),
     field("To", h("input", { name: "to", list: placesList, value: t.to ?? "", placeholder: "A country or city, e.g. Japan" }), "span-2"),
+    isFlight && airportField("fromAirport", "From airport", t.fromAirport, "fromAirportName", t.fromAirportName, "from"),
+    isFlight && airportField("toAirport", "To airport", t.toAirport, "toAirportName", t.toAirportName, "to"),
     field(isFlight ? "Flight no." : "Train or bus no.", h("input", { name: "number", value: t.number ?? "", placeholder: "Optional" }), "span-2"),
     field("Departs", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
     field("Arrives", h("input", { name: "arrive", type: "time", value: t.arrive ?? "" }), "span-1"),
@@ -2325,7 +2361,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       ...(travel ? { travel: {
         mode: category === "Flights" ? "flight" : groundMode,
         from: String(f.get("from") ?? "").trim(), to: String(f.get("to") ?? "").trim(), number: String(f.get("number") ?? "").trim(),
-        arrive: String(f.get("arrive") ?? ""), nextDay: f.get("nextDay") === "on",
+        arrive: String(f.get("arrive") ?? ""), nextDay: f.get("nextDay") === "on", ...readAirports(f),
       } } : {}),
     };
     const next = itemForm(draft, trip, days, onSave, onCancel, onDelete);
@@ -2377,8 +2413,9 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     const filled = isTravel ? {
       mode: String(f.get("mode")), from: String(f.get("from")).trim(), to: String(f.get("to")).trim(),
       number: String(f.get("number")).trim(), arrive: String(f.get("arrive") ?? ""), nextDay: f.get("nextDay") === "on",
+      ...(isFlight ? readAirports(f) : {}),
     } : null;
-    const travel = filled && (filled.from || filled.to || filled.number || filled.arrive) ? filled : undefined;
+    const travel = filled && (filled.from || filled.to || filled.number || filled.arrive || filled.fromAirport || filled.toAirport) ? filled : undefined;
     // The place: the one picked from suggestions, the old one if unchanged, or just what's typed (looked up by name).
     const placeText = isTravel ? "" : String(f.get("placeName") ?? "").trim();
     const place = isTravel ? undefined : picked && placeText === picked.name ? picked
@@ -2444,7 +2481,7 @@ function fillInfo(box, item, trip, days) {
     box.replaceChildren(h("div", { class: "info-body" },
       h("p", { class: "small muted" }, item.date ? dayLabel(item.date, days) : "Unscheduled"),
       h("h2", null, `${m.icon} ${routeText(item.travel) || item.title}`),
-      h("p", { class: "small muted" }, [m.label, item.travel.number, travelTimes(item)].filter(Boolean).join(" · ")),
+      h("p", { class: "small muted" }, [m.label, item.travel.number, airportRoute(item.travel), travelTimes(item)].filter(Boolean).join(" · ")),
       item.link && h("p", { class: "small" }, h("a", { href: item.link, target: "_blank", rel: "noopener noreferrer" }, "Booking ↗")),
       item.travel.to && h("p", { class: "small muted" }, tripCities(trip).some((c) => sameName(c.name, item.travel.to))
         ? `Arriving makes ${item.travel.to} where you're based from ${item.travel.nextDay ? "the next day" : "this day"} on, until you pick another city with 📍.`
