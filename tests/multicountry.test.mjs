@@ -50,7 +50,7 @@ test("CSV keeps each plan's currency", () => {
   assert.equal(items[0].currency, "EUR");
   assert.equal("currency" in items[1], false);
   const csv = itemsToCsv(items, "SGD");
-  assert.match(csv, /Tapas,,\w+,30,,EUR,/);
-  assert.match(csv, /Louvre,,\w+,22,,SGD,/);
+  assert.match(csv, /Tapas,,\w+,30,EUR,/);
+  assert.match(csv, /Louvre,,\w+,22,SGD,/);
   assert.equal(csvToItems(csv).items[1].currency, "SGD");
 });

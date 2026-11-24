@@ -51,7 +51,8 @@ test("export then import gives the same items back", () => {
   const { items } = csvToItems(
     'Date,Time,Title,Location,Category,Estimated cost,Actual cost,Notes,Link\n2026-06-03,10:00,"Tour, guided",Rome,Activities,40,38,"Bring ""ID""",https://x.test\n',
   );
-  const strip = (list) => list.map((i) => ({ ...i, id: "" }));
+  // One Cost column: what was paid where known, else the estimate.
+  const strip = (list) => list.map((i) => ({ ...i, id: "", estimatedCost: i.actualCost ?? i.estimatedCost, actualCost: null }));
   assert.deepEqual(strip(csvToItems(itemsToCsv(items)).items), strip(items));
 });
 

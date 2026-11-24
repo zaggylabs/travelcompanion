@@ -885,7 +885,7 @@ function summaryContent(trip, days, draft) {
   return [h("div", { class: "summary-body" },
     h("div", { class: "summary-head" }, h("h2", null, "Budget"), draft && h("span", { class: "summary-draft small" }, "Includes unsaved changes")),
     h("div", null,
-      h("p", { class: "small muted" }, "Expected total"),
+      h("p", { class: "small muted" }, "Total cost"),
       h("p", { class: "summary-total num" }, money(s.totalProjected)),
       alt(s.totalProjected, trip.currency, "summary-alt"),
       madeUpOf(s, trip),
@@ -1256,7 +1256,7 @@ function itemButton(item, trip, selected) {
       expectedCost(item) > 0 || isPaid(item)
         ? [formatMoney(expectedCost(item), itemCurrency(item, trip)), alt(expectedCost(item), itemCurrency(item, trip)),
            isPaid(item) ? h("small", { class: "paid" }, "✓ Paid")
-             : h("small", { class: "muted" }, item.actualCost !== null && item.actualCost !== undefined ? "To pay" : "Estimate")]
+             : h("small", { class: "muted" }, "To pay")]
         : ""));
 }
 
@@ -1707,7 +1707,7 @@ function selectedResult(trip) {
 }
 
 const resultLink = (r, d, trip) => mapsLink({ name: r.name, area: d.area?.name, country: getCountry(d.country || tripCountries(trip)[0])?.name });
-const resultPlace = (r, d) => ({ osm: r.osm, lat: r.lat, lon: r.lon, kind: r.kind.toLowerCase(), area: d.area?.label ?? "", ...(d.country ? { cc: d.country } : {}) });
+const resultPlace = (r, d) => ({ name: r.name, osm: r.osm, lat: r.lat, lon: r.lon, kind: r.kind.toLowerCase(), area: d.area?.label ?? "", ...(d.country ? { cc: d.country } : {}) });
 
 // The info panel works on plans, so give it a search result in that shape.
 function discoverAsItem(r, trip) {
@@ -2204,7 +2204,11 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   let country = getCountry(itemCountry(item, trip, days));
   const isTravel = TRAVEL_CATEGORIES.includes(item.category);
   const isFlight = item.category === "Flights";
-  const titleInput = h("input", { name: "title", required: !isTravel, autofocus: true, value: item.title });
+  // Title is whatever you call the plan ("Lunch at Ichiran"); Place is where, with suggestions from the map.
+  const titleInput = h("input", { name: "title", autofocus: true, value: item.title,
+    placeholder: isTravel ? "Optional, e.g. SQ 12 to Tokyo" : "e.g. Lunch at Ichiran, or Go to Disneyland" });
+  const startPlace = item.place?.name ?? (item.place ? item.title : "");
+  const placeInput = h("input", { name: "placeName", value: startPlace });
 
   // The cost's currency: the plan's own, or for a new plan on a multi-country trip, the day's country's.
   const isNew = !trip.items.some((i) => i.id === item.id);
@@ -2216,7 +2220,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   const setCur = (code) => {
     if (currencyTouched || !code || code === currencySelect.value) return;
     currencySelect.value = code;
-    estField.update(); actField.update();
+    costInput.update();
   };
 
   // Suggestions favour places around where you are that day, in that day's country.
@@ -2228,12 +2232,12 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       country = getCountry(dayCountry(trip, date, days));
       setCur(planCurrency(trip, country?.code));
     }
-    titleInput.placeholder = isTravel ? "Optional, e.g. SQ 12 to Tokyo" : b ? `Try a place near ${b.area || b.city}` : country ? `Try "Disney" or a place in ${country.name}` : "Sunset at Uluwatu";
+    placeInput.placeholder = b ? `Search for a place near ${b.area || b.city}` : country ? `Search, e.g. "Disney" or a place in ${country.name}` : "Search for a place";
   };
   const categorySelect = h("select", { name: "category" }, CATEGORIES.map((c) => h("option", { selected: c === item.category }, c)));
   const locationInput = h("input", { name: "location", placeholder: "Address or area", value: item.location });
   const linkInput = h("input", { name: "link", type: "url", placeholder: "https://", value: item.link });
-  let categoryTouched = Boolean(item.title); // don't second-guess a category on an existing plan
+  let categoryTouched = Boolean(item.title || startPlace); // don't second-guess a category on an existing plan
   categorySelect.addEventListener("change", () => {
     categoryTouched = true;
     // Flights and Transport switch to the travel layout (and back).
@@ -2244,7 +2248,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   let picked = null; // the place picked from suggestions, saved with the plan for the info panel
 
   // Typing a place suggests real ones in the trip's country, and fills in the rest of the form.
-  const placeBox = isTravel ? { el: titleInput } : autocomplete(titleInput, {
+  const placeBox = isTravel ? null : autocomplete(placeInput, {
     delay: 350,
     // A multi-country trip searches the day's country first, then the others.
     search: (q, signal) => searchPlaces(q, multi ? [country?.code, ...ccs] : country?.code, signal, { near }),
@@ -2257,30 +2261,26 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     ].filter(Boolean),
     footer: () => h("span", { class: "small muted" }, "Places from © OpenStreetMap contributors"),
     onPick: (p) => {
-      titleInput.value = p.name;
+      placeInput.value = p.name;
+      titleInput.placeholder = p.name;
       if (!locationInput.value.trim() || locationInput.value === autoLocation) {
         locationInput.value = autoLocation = [p.area, (!country || multi) && p.country].filter(Boolean).join(", ");
       }
       if (!linkInput.value.trim() || linkInput.value === autoLink) linkInput.value = autoLink = mapsLink(p);
       if (p.category && !categoryTouched) categorySelect.value = p.category;
-      picked = p.osm ? { osm: p.osm, lat: p.lat, lon: p.lon, kind: p.kind, area: p.area, ...(p.countryCode ? { cc: p.countryCode } : {}) } : null;
+      picked = { name: p.name, ...(p.osm ? { osm: p.osm, lat: p.lat, lon: p.lon, kind: p.kind, area: p.area } : {}), ...(p.countryCode ? { cc: p.countryCode } : {}) };
       if (multi && p.countryCode) setCur(planCurrency(trip, p.countryCode));
-      if (activeInfo?.isConnected) fillInfo(activeInfo, { ...item, title: p.name, category: categorySelect.value, place: picked }, trip, days);
+      if (activeInfo?.isConnected) fillInfo(activeInfo, { ...item, title: titleInput.value.trim() || p.name, category: categorySelect.value, place: picked }, trip, days);
     },
   });
 
   const useSelect = days.length > 0 && (item.date === "" || days.includes(item.date));
-  const actualInput = h("input", { name: "actualCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "Same as estimate", value: item.actualCost ?? "" });
+  // One cost: what it costs (older plans show what was paid if that was entered, else the estimate). Paid is the tick.
   const paidBox = h("input", { type: "checkbox", name: "paid", checked: isPaid(item) });
-  // Typing what you actually paid into an empty box ticks "Paid", unless you've set the box yourself.
-  let paidTouched = false;
-  paidBox.addEventListener("change", () => { paidTouched = true; });
-  const hadActual = item.actualCost !== null && item.actualCost !== undefined;
-  actualInput.addEventListener("input", () => { if (!paidTouched && !hadActual) paidBox.checked = actualInput.value.trim() !== ""; });
   const curNow = () => currencySelect.value;
-  const estField = costField("Estimated cost", h("input", { name: "estimatedCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: item.estimatedCost || "" }), curNow);
-  const actField = costField("Actual cost", actualInput, curNow);
-  currencySelect.addEventListener("change", () => { currencyTouched = true; estField.update(); actField.update(); });
+  const costInput = costField("Cost", h("input", { name: "cost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: expectedCost(item) || "" }), curNow);
+  currencySelect.addEventListener("change", () => { currencyTouched = true; costInput.update(); });
+  const readCost = (f) => Number(f.get("cost")) || 0;
   setDay(item.date);
   // Travel plans: from → to (any place, home included), number and times instead of one place.
   const t = item.travel ?? {};
@@ -2306,17 +2306,18 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   // Changing to or from Flights / Transport redraws the form in the other layout, keeping what's been typed.
   const switchKind = (category) => {
     const f = new FormData(form);
-    const actualRaw = String(f.get("actualCost") ?? "").trim();
     const { travel: _t, currency: _c, ...rest } = item;
     const travel = TRAVEL_CATEGORIES.includes(category);
+    const placeText = String(f.get("placeName") ?? "").trim();
     const draft = {
       ...rest,
       title: String(f.get("title") ?? "").trim(),
       date: String(f.get("date") ?? ""),
       time: String(f.get("time") ?? ""),
       category,
-      estimatedCost: Number(f.get("estimatedCost")) || 0,
-      actualCost: actualRaw === "" || Number.isNaN(Number(actualRaw)) ? null : Number(actualRaw),
+      ...(picked ? { place: picked } : placeText && placeText !== startPlace ? { place: { name: placeText } } : {}),
+      estimatedCost: readCost(f),
+      actualCost: null,
       paid: paidBox.checked,
       link: String(f.get("link") ?? "").trim(),
       notes: String(f.get("notes") ?? ""),
@@ -2333,19 +2334,18 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   };
 
   const form = h("form", { class: "card pad form-grid six editing" },
-    field(isTravel ? "Name" : "What", placeBox.el, "span-4"),
+    field(isTravel ? "Name" : "Title", titleInput, "span-4"),
     field("Category", categorySelect, "span-2"),
+    !isTravel && field("Place", placeBox.el, "span-3"),
+    !isTravel && field("Where", locationInput, "span-3"),
     field("Day", useSelect
       ? h("select", { name: "date" },
           h("option", { value: "", selected: item.date === "" }, "Unscheduled"),
           days.map((d, i) => h("option", { value: d, selected: d === item.date }, `Day ${i + 1} · ${formatDay(d)}`)))
       : h("input", { name: "date", type: "date", value: item.date }), "span-2"),
-    isTravel ? travelFields : [
-      field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
-      field("Where", locationInput, "span-3")],
-    estField.el,
-    actField.el,
-    field("Currency", currencySelect, "span-2"),
+    isTravel ? travelFields : field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
+    costInput.el,
+    field("Currency", currencySelect, "span-1"),
     field("Link", linkInput, "span-all"),
     field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"),
     h("label", { class: "check span-all" }, paidBox, h("span", null, "Paid"), h("span", { class: "small muted" }, " · ticks it off the to-pay list on the right")),
@@ -2358,13 +2358,12 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   form.addEventListener("input", () => {
     if (!activeSummary?.box.isConnected) return;
     const f = new FormData(form);
-    const actualRaw = String(f.get("actualCost")).trim();
     const draft = {
       ...withCurrency(item, String(f.get("currency")), trip),
       category: String(f.get("category")),
       date: String(f.get("date") ?? ""),
-      estimatedCost: Number(f.get("estimatedCost")) || 0,
-      actualCost: actualRaw === "" || Number.isNaN(Number(actualRaw)) ? null : Number(actualRaw),
+      estimatedCost: readCost(f),
+      actualCost: null,
       paid: paidBox.checked,
     };
     const current = loadTrips().find((t) => t.id === trip.id) ?? trip;
@@ -2380,22 +2379,24 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       number: String(f.get("number")).trim(), arrive: String(f.get("arrive") ?? ""), nextDay: f.get("nextDay") === "on",
     } : null;
     const travel = filled && (filled.from || filled.to || filled.number || filled.arrive) ? filled : undefined;
-    const title = String(f.get("title")).trim() || (travel ? travelTitle(travel) : "");
-    if (!title) return;
-    const actualRaw = String(f.get("actualCost")).trim();
-    const actual = actualRaw === "" ? null : Number(actualRaw);
-    const { travel: _old, ...base } = withCurrency(item, String(f.get("currency")), trip);
+    // The place: the one picked from suggestions, the old one if unchanged, or just what's typed (looked up by name).
+    const placeText = isTravel ? "" : String(f.get("placeName") ?? "").trim();
+    const place = isTravel ? undefined : picked && placeText === picked.name ? picked
+      : placeText && placeText === startPlace ? item.place : placeText ? { name: placeText } : undefined;
+    const title = String(f.get("title")).trim() || placeText || (travel ? travelTitle(travel) : "");
+    if (!title) { titleInput.focus(); return; }
+    const { travel: _old, place: _p, ...base } = withCurrency(item, String(f.get("currency")), trip);
     onSave({
       ...base,
       title,
-      place: picked ?? (title === item.title ? item.place : undefined),
+      ...(place ? { place } : {}),
       category: String(f.get("category")),
       date: String(f.get("date") ?? ""),
       time: String(f.get("time") ?? ""),
       location: travel ? routeText(travel) : isTravel ? "" : String(f.get("location")).trim(),
       ...(travel ? { travel } : {}),
-      estimatedCost: Number(f.get("estimatedCost")) || 0,
-      actualCost: actual === null || Number.isNaN(actual) ? null : actual,
+      estimatedCost: readCost(f),
+      actualCost: null,
       paid: paidBox.checked,
       link: String(f.get("link")).trim(),
       notes: String(f.get("notes")),
@@ -2451,7 +2452,7 @@ function fillInfo(box, item, trip, days) {
     return;
   }
   const country = getCountry(itemCountry(item, trip, days));
-  const infoP = track(getPlaceInfo({ title: item.title, place: item.place, countryCode: country?.code }));
+  const infoP = track(getPlaceInfo({ title: item.place?.name || item.title, place: item.place, countryCode: country?.code }));
   const year = /^\d{4}/.test(item.date) ? item.date.slice(0, 4) : null;
   const holP = track(getHolidays(country?.code, year));
   const draw = () => {
@@ -2473,7 +2474,7 @@ function infoContent(item, trip, days, info, hol) {
   const section = (title, ...body) => h("section", { class: "info-sec" }, h("h3", null, title), ...body);
   const extLink = (href, text) => h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text);
   const maps = item.link?.startsWith("https://www.google.com/maps") ? item.link
-    : mapsLink({ name: data?.name || item.title, area: data?.area || item.location, country: getCountry(itemCountry(item, trip, days))?.name });
+    : mapsLink({ name: data?.name || item.place?.name || item.title, area: data?.area || item.location, country: getCountry(itemCountry(item, trip, days))?.name });
 
   const note = hol ? dayNote(item.date, hol.value ?? null) : null;
   const tip = crowdTip(kind, item.category);
@@ -2494,7 +2495,7 @@ function infoContent(item, trip, days, info, hol) {
       info?.error && h("div", { class: "small" }, h("p", { class: "muted" }, "Couldn't load place info right now."),
         h("button", { class: "btn", type: "button", onclick: () => render() }, "Try again")),
       !loading && !info.error && !data && h("p", { class: "small muted" },
-        `We couldn't find "${item.title}" on the map. Edit it and pick it from the suggestions to get its info.`),
+        `We couldn't find "${item.place?.name || item.title}" on the map. Edit it and pick the place from the suggestions to get its info.`),
       data?.wiki && h("div", { class: "info-wiki" },
         h("p", { class: "info-extract" }, data.wiki.extract),
         h("p", { class: "small" }, extLink(data.wiki.url, "Read more on Wikipedia"))),
@@ -2556,7 +2557,7 @@ function budgetView(trip, days) {
     return h("tr", null,
       h("td", null, h("i", { class: `dot cat-${category}` }), category),
       h("td", { class: "limit" }, input, limitAlt),
-      r.planned, r.spent, r.projected, r.bar);
+      r.spent, r.projected, r.bar);
   });
 
   refs.perPerson = h("p", { class: "muted" });
@@ -2564,18 +2565,17 @@ function budgetView(trip, days) {
 
   const view = h("div", { class: "stack" },
     h("div", { class: "stats" },
-      stat("budget"), stat("expected", "Paid amounts, plus estimates for the rest"), stat("paid"), stat("left")),
+      stat("budget"), stat("expected", "Every plan's cost"), stat("paid"), stat("left")),
     refs.perPerson,
     h("div", { class: "card table-wrap" },
       h("table", { class: "budget" },
         h("thead", null, h("tr", null,
-          h("th", null, "Category"), h("th", null, `Budget limit (${trip.currency})`), h("th", { class: "r" }, "Estimated"),
-          h("th", { class: "r" }, "Paid"), h("th", { class: "r" }, "Expected"), h("th", null, h("span", { class: "sr-only" }, "Progress")))),
+          h("th", null, "Category"), h("th", null, `Budget limit (${trip.currency})`),
+          h("th", { class: "r" }, "Paid"), h("th", { class: "r" }, "Total"), h("th", null, h("span", { class: "sr-only" }, "Progress")))),
         h("tbody", null, rows),
         h("tfoot", null, h("tr", null,
-          h("td", null, "Total"), refs.foot.budget, refs.foot.planned, refs.foot.spent, refs.foot.projected, h("td", null))))),
-    h("p", { class: "small muted" }, "Expected uses what you actually paid where you've entered it, and the estimate for everything else.",
-      tripCurrencyList(trip).length > 1 ? ` Plans in other currencies are converted to ${trip.currency} at today's rate.` : ""),
+          h("td", null, "Total"), refs.foot.budget, refs.foot.spent, refs.foot.projected, h("td", null))))),
+    tripCurrencyList(trip).length > 1 && h("p", { class: "small muted" }, `Plans in other currencies are converted to ${trip.currency} at today's rate.`),
     refs.madeOf = h("div"),
     rateNote(trip),
     days.length > 0 && h("section", null,
@@ -2604,7 +2604,7 @@ function budgetView(trip, days) {
     const hasBudget = s.totalBudget > 0;
     const over = hasBudget && s.remaining < 0;
     setStat("budget", "Budget", hasBudget ? money(s.totalBudget) : "Not set", "", s.totalBudget);
-    setStat("expected", "Expected total", money(s.totalProjected), "", s.totalProjected);
+    setStat("expected", "Total cost", money(s.totalProjected), "", s.totalProjected);
     setStat("paid", "Paid so far", money(s.totalSpent), "", s.totalSpent);
     setStat("left", over ? "Over budget" : "Left to spend", hasBudget ? money(Math.abs(s.remaining)) : "Not set", over ? "bad" : hasBudget ? "good" : "", hasBudget ? Math.abs(s.remaining) : 0);
     const both = (n) => money(n) + (homeText(n, current.currency) ? ` (${homeText(n, current.currency)})` : "");
@@ -2614,7 +2614,6 @@ function budgetView(trip, days) {
       const r = refs.cats[c.category];
       const isOver = c.budget !== null && c.projected > c.budget;
       setAlt(r.limitAlt, c.budget ?? 0);
-      r.planned.textContent = money(c.planned);
       r.spent.textContent = money(c.spent);
       r.projected.replaceChildren(money(c.projected), alt(c.projected, current.currency) ?? "");
       r.projected.className = `r num ${isOver ? "bad strong" : ""}`;
@@ -2624,7 +2623,6 @@ function budgetView(trip, days) {
         : "");
     }
     refs.foot.budget.textContent = hasBudget ? money(s.totalBudget) : "";
-    refs.foot.planned.textContent = money(s.totalPlanned);
     refs.foot.spent.textContent = money(s.totalSpent);
     refs.foot.projected.replaceChildren(money(s.totalProjected), alt(s.totalProjected, current.currency) ?? "");
     refs.madeOf.replaceChildren(...[madeUpOf(s, current), unconvertedNote(s, current)].filter(Boolean));

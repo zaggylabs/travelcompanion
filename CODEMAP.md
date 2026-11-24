@@ -52,10 +52,11 @@ Plain static site: no build step, no API keys. The only server code is three Clo
   dayBases: { "2026-12-10": { city, area?, lat?, lon? } },  // a day's own 📍 wins; else a travel plan arriving in a trip city (or a trip country → its first city) that day; else carries on from the last of those
   currency,           // "Totals in": totals and budget limits are in this
   budget: { Food: 300, ... },
-  items: [{ id, date, time, title, location, category, estimatedCost, actualCost, paid,
+  items: [{ id, date, time, title,   // title is free text ("Lunch at Ichiran"); place.name is the map place
+            location, category, estimatedCost, actualCost, paid,  // the form has one Cost: saves estimatedCost, actualCost null; older plans' cost = actualCost ?? estimatedCost (expectedCost)
             currency?,  // only when different from trip.currency
             travel?: { mode: "flight|train|bus|ferry|car", from, to, number, arrive, nextDay },  // Flights/Transport plans with a route; time = departure
-            notes, link, place?: { osm, lat, lon, kind, area, cc? }, fromIdea?, attachments?: [...] }],
+            notes, link, place?: { name, osm?, lat, lon, kind, area, cc? }, fromIdea?, attachments?: [...] }],
   ideas: [{ id, title, group, location, link, bookingLink?, details?: { address, area, rating, ratingScale, reviews, stars, image, price }, notes, place?, createdAt }] }  // a plan made from one gets bookingLink || link
 ```
 

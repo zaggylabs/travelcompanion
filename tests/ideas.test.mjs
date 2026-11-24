@@ -20,7 +20,7 @@ test("adding a saved place makes a plan with its details", () => {
   assert.equal(item.date, "2026-12-02");
   assert.equal(item.time, "21:30");
   assert.equal(item.notes, "go late");
-  assert.deepEqual(item.place, { osm: "N1" });
+  assert.deepEqual(item.place, { name: "Ichiran Shibuya", osm: "N1" });
   assert.equal(item.fromIdea, idea.id);
   assert.notEqual(item.id, idea.id);
   assert.equal(ideaToItem({ ...idea, group: "Stays" }, "", "").category, "Lodging");

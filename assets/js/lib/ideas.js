@@ -46,7 +46,7 @@ export function ideaToItem(idea, date, time) {
     actualCost: null,
     notes: idea.notes || "",
     link: idea.bookingLink || idea.link || "", // the booking page is more useful on a plan than a map search
-    ...(idea.place ? { place: idea.place } : {}),
+    ...(idea.place ? { place: { name: idea.title, ...idea.place } } : {}),
     fromIdea: idea.id,
   };
 }

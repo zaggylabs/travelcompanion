@@ -38,7 +38,7 @@ export function toCsv(rows) {
   return rows.map((r) => r.map((c) => escapeCell(String(c))).join(",")).join("\r\n") + "\r\n";
 }
 
-export const EXPORT_HEADERS = ["Date", "Time", "Title", "Location", "Category", "Estimated cost", "Actual cost", "Currency", "Notes", "Link"];
+export const EXPORT_HEADERS = ["Date", "Time", "Title", "Location", "Category", "Cost", "Currency", "Notes", "Link"];
 
 /** `currency` is the trip's: plans without their own currency are written with it. */
 export function itemsToCsv(items, currency = "") {
@@ -46,7 +46,7 @@ export function itemsToCsv(items, currency = "") {
     (a.date || "9999").localeCompare(b.date || "9999") || a.time.localeCompare(b.time));
   return toCsv([
     EXPORT_HEADERS,
-    ...sorted.map((i) => [i.date, i.time, i.title, i.location, i.category, i.estimatedCost, i.actualCost ?? "", i.currency || currency, i.notes, i.link]),
+    ...sorted.map((i) => [i.date, i.time, i.title, i.location, i.category, (i.actualCost ?? i.estimatedCost) || 0, i.currency || currency, i.notes, i.link]),
   ]);
 }
 
