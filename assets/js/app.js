@@ -10,6 +10,7 @@ import { formatMoney } from "./lib/money.js";
 import { browserGuess, convert, getRates, savedHome, saveHome } from "./lib/rates.js";
 import { expectedCost, summarizeBudget } from "./lib/budget.js";
 import { csvToItems, itemsToCsv } from "./lib/csv.js";
+import { IDEA_GROUPS, emptyIdea, groupForPlace, groupIdeas, groupOf, ideaToItem } from "./lib/ideas.js";
 import { deleteTrip, loadTrips, saveTrip, STORAGE_KEY } from "./lib/store.js";
 import {
   ACCEPT, MAX_FILE_BYTES, deleteFile, deleteItemFiles, deleteTripFiles, formatSize, getFile, isAllowedType, putFile, requestPersistence,
@@ -52,6 +53,9 @@ const ui = {
   confirmRemoveFile: null, // attachment id awaiting "Remove?" confirmation
   selectedItem: null, // plan whose place info shows in the info panel
   homeOpen: false, // home currency settings card
+  selectedIdea: null, // saved place whose info shows in the info panel
+  editingIdea: null, // saved place id being edited
+  schedulingIdea: null, // saved place id whose "Add to itinerary" picker is open
 };
 
 /* ---------- home currency ---------- */
@@ -75,7 +79,8 @@ function loadRates() {
 // Don't rebuild the page under someone who's typing; the summary can still update in place.
 function refreshAfterRates() {
   const typing = root.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
-  if (!typing && !ui.editingItem && !ui.editingTrip) return render();
+  const draftIdea = Boolean(root.querySelector(".ideas-add input[name=title]")?.value);
+  if (!typing && !ui.editingItem && !ui.editingTrip && !ui.editingIdea && !ui.schedulingIdea && !draftIdea) return render();
   const trip = loadTrips().find((t) => t.id === currentTripId());
   if (trip && activeSummary?.box.isConnected) activeSummary.update(trip);
 }
@@ -122,7 +127,7 @@ function currentTripId() {
 }
 
 function openTrip(id) {
-  Object.assign(ui, { tab: "itinerary", selectedItem: null, editingTrip: false, confirmDelete: false, editingItem: null, notice: null, attachOpen: null, attachError: null, confirmRemoveFile: null });
+  Object.assign(ui, { tab: "itinerary", selectedItem: null, editingTrip: false, confirmDelete: false, editingItem: null, notice: null, attachOpen: null, attachError: null, confirmRemoveFile: null, selectedIdea: null, editingIdea: null, schedulingIdea: null });
   location.hash = id ? `trip/${encodeURIComponent(id)}` : "";
   if (!id) history.replaceState(null, "", location.pathname + location.search);
   render();
@@ -386,17 +391,19 @@ function tripView(trip) {
       h("span", null, ui.notice),
       h("button", { type: "button", "aria-label": "Dismiss", onclick: () => { ui.notice = null; render(); } }, "✕")),
     h("div", { class: "trip-layout" },
-      WIDE.matches && h("aside", { class: "trip-info", "aria-label": "About this place" }, infoPanel(selectedItem(trip, days), trip, days)),
+      WIDE.matches && h("aside", { class: "trip-info", "aria-label": "About this place" },
+        infoPanel(ui.tab === "ideas" ? ideaAsItem(selectedIdea(trip)) : selectedItem(trip, days), trip, days)),
       h("div", { class: "trip-main stack" },
         h("div", { class: "tabs", role: "tablist" }, Object.entries(TABS).map(([t, label]) =>
           h("button", { role: "tab", type: "button", "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
-            onclick: () => { ui.tab = t; ui.editingItem = null; ui.attachOpen = null; render(); } }, label))),
-        ui.tab === "guide" ? guideView(trip) : ui.tab === "budget" ? budgetView(trip, days) : itineraryView(trip, days)),
+            onclick: () => { Object.assign(ui, { tab: t, editingItem: null, attachOpen: null, editingIdea: null, schedulingIdea: null }); render(); } },
+            label, t === "ideas" && trip.ideas?.length ? h("span", { class: "tab-count num" }, trip.ideas.length) : null))),
+        ui.tab === "guide" ? guideView(trip) : ui.tab === "budget" ? budgetView(trip, days) : ui.tab === "ideas" ? ideasView(trip, days) : itineraryView(trip, days)),
       h("aside", { class: "trip-budget", "aria-label": "Budget" },
         budgetSummary(trip, days))));
 }
 
-const TABS = { itinerary: "Itinerary", budget: "Budget", guide: "Good to know" };
+const TABS = { itinerary: "Itinerary", ideas: "Saved places", budget: "Budget", guide: "Good to know" };
 
 /* ----- "Good to know" tab: entry rules, etiquette, money, plugs, emergency numbers ----- */
 
@@ -732,6 +739,212 @@ function itemButton(item, trip, selected) {
         : item.estimatedCost > 0 ? [formatMoney(item.estimatedCost, trip.currency), alt(item.estimatedCost, trip.currency), h("small", { class: "muted" }, "Estimate")] : ""));
 }
 
+/* ----- saved places: a scratchpad of places, each one a click away from the itinerary ----- */
+
+const plansFrom = (trip, idea) => trip.items.filter((i) => i.fromIdea === idea.id);
+
+/** The saved place the info panel is about: the one being edited, picked or scheduled, or the first one. */
+function selectedIdea(trip) {
+  const ideas = trip.ideas ?? [];
+  const id = ui.editingIdea ?? ui.selectedIdea ?? ui.schedulingIdea;
+  return ideas.find((i) => i.id === id) ?? groupIdeas(ideas, (i) => plansFrom(trip, i).length > 0)[0]?.ideas[0] ?? null;
+}
+
+// The info panel works on plans, so give it a saved place in that shape.
+const ideaAsItem = (idea) => idea && {
+  id: idea.id, title: idea.title, location: idea.location, link: idea.link, place: idea.place,
+  category: groupOf(idea.group).category, group: idea.group, date: "", time: "", saved: true,
+};
+
+// Re-reads the trip before writing so the list never overwrites newer edits.
+function updateIdeas(tripId, fn) {
+  const trip = loadTrips().find((t) => t.id === tripId);
+  if (trip) saveTrip({ ...trip, ideas: fn(trip.ideas ?? []) });
+}
+
+function dayLabel(date, days) {
+  if (!date) return "Unscheduled";
+  const i = days.indexOf(date);
+  return i >= 0 ? `Day ${i + 1}` : formatDay(date);
+}
+
+function goToPlan(planId) {
+  Object.assign(ui, { tab: "itinerary", selectedItem: planId, editingItem: null, attachOpen: null, editingIdea: null, schedulingIdea: null });
+  render();
+  root.querySelector(".item-wrap.selected")?.scrollIntoView({ block: "center" });
+}
+
+function ideasView(trip, days) {
+  const ideas = trip.ideas ?? [];
+  const groups = groupIdeas(ideas, (i) => plansFrom(trip, i).length > 0);
+  const selected = selectedIdea(trip);
+
+  const addNew = (idea) => {
+    updateIdeas(trip.id, (list) => [...list, idea]);
+    Object.assign(ui, { lastIdeaGroup: idea.group, selectedIdea: idea.id, focusIdeaForm: true });
+    render();
+  };
+  const saveEdit = (idea) => {
+    updateIdeas(trip.id, (list) => list.map((i) => (i.id === idea.id ? idea : i)));
+    ui.editingIdea = null;
+    render();
+  };
+  const remove = (idea) => {
+    updateIdeas(trip.id, (list) => list.filter((i) => i.id !== idea.id));
+    Object.assign(ui, { editingIdea: null, selectedIdea: null, schedulingIdea: null });
+    render();
+  };
+  const cancel = () => { ui.editingIdea = null; render(); };
+
+  const focus = Boolean(ui.focusIdeaForm);
+  ui.focusIdeaForm = false;
+  const adding = !ui.editingIdea;
+
+  return h("div", { class: "stack ideas" },
+    h("div", { class: "card pad stack ideas-add" },
+      h("div", null,
+        h("h2", null, "Saved places"),
+        h("p", { class: "small muted" }, "Jot down places you might go: somewhere to eat, a sight, an activity. When you know when, press ",
+          h("strong", null, "Add to itinerary"), " and pick the day and time.")),
+      adding && ideaForm(emptyIdea(ui.lastIdeaGroup || "Food"), trip, days, addNew, null, null, focus)),
+    groups.length === 0
+      ? h("p", { class: "card pad center muted" }, "Nothing saved yet. Places you add above show up here, grouped by type.")
+      : groups.map((g) => h("section", { class: "day", "aria-label": g.label },
+          h("div", { class: "day-head" }, h("h3", null, g.label), h("span", { class: "muted" }, String(g.ideas.length))),
+          h("ul", { class: "items" }, g.ideas.map((idea) => h("li", null,
+            ui.editingIdea === idea.id
+              ? ideaForm(idea, trip, days, saveEdit, cancel, () => remove(idea), true)
+              : [ideaRow(idea, trip, days, selected?.id === idea.id),
+                 ui.schedulingIdea === idea.id && schedulePanel(idea, trip, days),
+                 !WIDE.matches && selected?.id === idea.id && ui.selectedIdea === idea.id && h("div", { class: "info-inline" }, infoPanel(ideaAsItem(idea), trip, days))]))))),
+    ideas.length > 0 && h("p", { class: "small muted" }, "Saved places stay in this browser and aren't part of CSV exports. Plans you add from them are."));
+}
+
+function ideaRow(idea, trip, days, selected) {
+  const plans = plansFrom(trip, idea);
+  const scheduling = ui.schedulingIdea === idea.id;
+  const edit = () => { Object.assign(ui, { editingIdea: idea.id, selectedIdea: idea.id, schedulingIdea: null }); render(); };
+  return h("div", { class: `item-wrap idea${selected ? " selected" : ""}${plans.length ? " added" : ""}` },
+    h("div", { class: "item idea-card", role: "button", tabindex: "0", "aria-pressed": String(Boolean(selected)),
+      title: selected ? "Click again to edit" : "Show info about this place",
+      onclick: (e) => {
+        if (e.target.closest("a, button")) return; // the "on Day 2" links inside
+        if (selected && ui.selectedIdea === idea.id) return edit();
+        Object.assign(ui, { selectedIdea: idea.id, editingIdea: null });
+        render();
+      },
+      onkeydown: (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); e.currentTarget.click(); } } },
+      h("span", { class: "item-main" },
+        h("span", { class: "item-title" }, idea.title),
+        h("span", { class: "item-meta" },
+          idea.location && h("span", null, idea.location),
+          idea.notes && h("em", null, idea.notes)),
+        plans.length > 0 && h("span", { class: "idea-plans" }, plans
+          .sort((a, b) => (a.date || "9").localeCompare(b.date || "9") || byTime(a, b))
+          .map((p) => h("button", { class: "idea-plan", type: "button", title: "Show it in the itinerary", onclick: () => goToPlan(p.id) },
+            "✓ ", dayLabel(p.date, days), p.time && ` · ${p.time}`))))),
+    h("button", { class: `btn idea-add${scheduling ? " active" : ""}`, type: "button", "aria-expanded": String(scheduling),
+      onclick: () => { Object.assign(ui, { schedulingIdea: scheduling ? null : idea.id, selectedIdea: idea.id, editingIdea: null }); render(); } },
+      plans.length ? "Add again" : "Add to itinerary"),
+    h("button", { class: "attach-btn", type: "button", "aria-label": `Edit ${idea.title}`, title: "Edit", onclick: edit }, pencilIcon()));
+}
+
+function schedulePanel(idea, trip, days) {
+  const fallback = days.includes(ui.lastScheduleDate) ? ui.lastScheduleDate : days[0] ?? "";
+  const daySelect = days.length
+    ? h("select", { name: "date", autofocus: true },
+        days.map((d, i) => h("option", { value: d, selected: d === fallback }, `Day ${i + 1} · ${formatDay(d)}`)),
+        h("option", { value: "" }, "Unscheduled"))
+    : h("input", { name: "date", type: "date", autofocus: true, value: ui.lastScheduleDate || "" });
+  const form = h("form", { class: "attach-panel card schedule-panel" },
+    h("p", { class: "small" }, "Add ", h("strong", null, idea.title), " to your itinerary"),
+    h("div", { class: "schedule-row" },
+      field("Day", daySelect),
+      field("Time (optional)", h("input", { name: "time", type: "time" })),
+      h("div", { class: "actions" },
+        h("button", { class: "btn primary", type: "submit" }, "Add"),
+        h("button", { class: "btn", type: "button", onclick: () => { ui.schedulingIdea = null; render(); } }, "Cancel"))),
+    days.length === 0 && h("p", { class: "small muted" }, "Tip: set the trip's dates in Edit trip to pick from Day 1, Day 2 and so on."));
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const date = String(f.get("date") ?? "");
+    const time = String(f.get("time") ?? "");
+    const current = loadTrips().find((t) => t.id === trip.id);
+    if (!current) return;
+    saveTrip({ ...current, items: [...current.items, ideaToItem(idea, date, time)] });
+    Object.assign(ui, { schedulingIdea: null, lastScheduleDate: date });
+    render();
+  });
+  return form;
+}
+
+function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
+  const isNew = !onCancel;
+  const country = getCountry(trip.country);
+  const titleInput = h("input", {
+    name: "title", required: true, autofocus: focus || null, value: idea.title,
+    placeholder: country ? `A place in ${country.name}, e.g. a restaurant or sight` : "A restaurant, sight or activity",
+  });
+  const groupSelect = h("select", { name: "group" }, IDEA_GROUPS.map((g) => h("option", { value: g.key, selected: g.key === idea.group }, g.label)));
+  const locationInput = h("input", { name: "location", placeholder: "Filled in when you pick a suggestion", value: idea.location });
+  let groupTouched = !isNew;
+  groupSelect.addEventListener("change", () => { groupTouched = true; });
+  let autoLocation = null;
+  let picked = null;
+
+  const placeBox = autocomplete(titleInput, {
+    delay: 350,
+    search: (q, signal) => searchPlaces(q, country?.code, signal),
+    renderItem: (p) => [
+      h("span", { class: "ac-icon", "aria-hidden": "true" }, "📍"),
+      h("span", { class: "ac-main" },
+        h("span", { class: "ac-title" }, p.name),
+        h("span", { class: "ac-sub small muted" }, [p.area, !country && p.country].filter(Boolean).join(", "))),
+      p.kind && h("span", { class: "ac-tag" }, p.kind),
+    ].filter(Boolean),
+    footer: () => h("span", { class: "small muted" }, "Places from © OpenStreetMap contributors"),
+    onPick: (p) => {
+      titleInput.value = p.name;
+      if (!locationInput.value.trim() || locationInput.value === autoLocation) {
+        locationInput.value = autoLocation = [p.area, !country && p.country].filter(Boolean).join(", ");
+      }
+      const g = groupForPlace(p);
+      if (g && !groupTouched) groupSelect.value = g;
+      picked = { link: mapsLink(p), place: p.osm ? { osm: p.osm, lat: p.lat, lon: p.lon, kind: p.kind, area: p.area } : undefined };
+      if (activeInfo?.isConnected) fillInfo(activeInfo, { ...ideaAsItem(idea), title: p.name, group: groupSelect.value, place: picked.place }, trip, days);
+    },
+  });
+
+  const form = h("form", { class: `form-grid six${isNew ? "" : " card pad editing"}` },
+    field("Place", placeBox.el, "span-4"),
+    field("Type", groupSelect, "span-2"),
+    field("Where", locationInput, "span-3"),
+    field("Note", h("input", { name: "notes", placeholder: "Optional, e.g. try the tonkotsu", value: idea.notes }), "span-3"),
+    h("div", { class: "actions span-all" },
+      h("button", { class: "btn primary", type: "submit" }, isNew ? "Save place" : "Save"),
+      onCancel && h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
+      onDelete && h("button", { class: "btn danger push", type: "button", onclick: onDelete }, "Delete")));
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const title = String(f.get("title")).trim();
+    if (!title) return;
+    const same = title === idea.title;
+    onSave({
+      ...idea,
+      title,
+      group: String(f.get("group")),
+      location: String(f.get("location")).trim(),
+      notes: String(f.get("notes")).trim(),
+      // A renamed place without a new pick loses the old map link and place match.
+      link: picked?.link ?? (same ? idea.link : ""),
+      place: picked ? picked.place : same ? idea.place : undefined,
+    });
+  });
+  return form;
+}
+
 /* ----- attachments ----- */
 
 let fileUrls = [];
@@ -982,7 +1195,9 @@ function fillInfo(box, item, trip, days) {
   if (!item) {
     box.replaceChildren(h("div", { class: "info-body" },
       h("h2", null, "Place info"),
-      h("p", { class: "small muted" }, "Add a plan, then pick it in the itinerary to see opening hours, a short guide and crowd tips here.")));
+      h("p", { class: "small muted" }, ui.tab === "ideas"
+        ? "Save a place, then pick it to see opening hours, a short guide and crowd tips here."
+        : "Add a plan, then pick it in the itinerary to see opening hours, a short guide and crowd tips here.")));
     return;
   }
   const country = getCountry(trip.country);
@@ -1003,7 +1218,7 @@ function infoContent(item, trip, days, info, hol) {
   const data = info?.value ?? null;
   const loading = !info;
   const dayIdx = days.indexOf(item.date);
-  const when = [item.date ? (dayIdx >= 0 ? `Day ${dayIdx + 1} · ${formatDay(item.date)}` : formatDay(item.date)) : "Unscheduled", item.time].filter(Boolean).join(" · ");
+  const when = item.saved ? `Saved place · ${groupOf(item.group).label}` : [item.date ? (dayIdx >= 0 ? `Day ${dayIdx + 1} · ${formatDay(item.date)}` : formatDay(item.date)) : "Unscheduled", item.time].filter(Boolean).join(" · ");
   const kind = data?.kind || item.place?.kind || "";
   const section = (title, ...body) => h("section", { class: "info-sec" }, h("h3", null, title), ...body);
   const extLink = (href, text) => h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text);
@@ -1014,7 +1229,7 @@ function infoContent(item, trip, days, info, hol) {
   const tip = crowdTip(kind, item.category);
   const crowds = section("Busy times",
     note && h("p", { class: `info-day ${note.busy ? "busy" : "quiet"}` }, note.text),
-    !item.date && h("p", { class: "small muted" }, "Give this plan a day to see if it falls on a weekend or public holiday."),
+    !item.date && h("p", { class: "small muted" }, item.saved ? "Add it to a day to see if that day is a weekend or public holiday." : "Give this plan a day to see if it falls on a weekend or public holiday."),
     tip && h("p", { class: "small" }, h("span", { class: "muted" }, "General tip: "), tip),
     h("p", { class: "small muted" }, "There's no free source of real peak hours for a place, so we don't guess. Google Maps shows ",
       extLink(maps, "Popular times"), " for most places."));
@@ -1029,7 +1244,7 @@ function infoContent(item, trip, days, info, hol) {
       info?.error && h("div", { class: "small" }, h("p", { class: "muted" }, "Couldn't load place info right now."),
         h("button", { class: "btn", type: "button", onclick: () => render() }, "Try again")),
       !loading && !info.error && !data && h("p", { class: "small muted" },
-        `We couldn't find "${item.title}" on the map. Edit the plan and pick it from the suggestions to get its info.`),
+        `We couldn't find "${item.title}" on the map. Edit it and pick it from the suggestions to get its info.`),
       data?.wiki && h("div", { class: "info-wiki" },
         h("p", { class: "info-extract" }, data.wiki.extract),
         h("p", { class: "small" }, extLink(data.wiki.url, "Read more on Wikipedia"))),
@@ -1044,7 +1259,7 @@ function infoContent(item, trip, days, info, hol) {
           data.phone && h("li", null, h("a", { href: `tel:${data.phone.split(/[;,]/)[0].replace(/[^\d+]/g, "")}` }, data.phone.split(";")[0])),
           data.fee && h("li", null, data.fee === "yes" ? "Entry fee charged" : data.fee === "no" ? "Free entry" : `Fee: ${data.fee}`))),
       crowds,
-      data?.guessed && h("p", { class: "small muted" }, "Matched by name. Wrong place? Edit the plan and pick the right one from the suggestions."),
+      data?.guessed && h("p", { class: "small muted" }, "Matched by name. Wrong place? Edit it and pick the right one from the suggestions."),
       h("p", { class: "small muted info-credit" }, "Info from ",
         data?.osmUrl ? extLink(data.osmUrl, "OpenStreetMap") : "OpenStreetMap",
         data?.wiki ? [" and ", extLink(data.wiki.url, "Wikipedia")] : "",
