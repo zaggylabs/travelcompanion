@@ -1,5 +1,6 @@
 import { CATEGORIES } from "./constants.js";
 import { round2 } from "./money.js";
+import { budgetEntries } from "./bookings.js";
 
 /** What an item will end up costing: the actual amount once paid, otherwise the estimate. */
 export const expectedCost = (item) => (item.actualCost ?? item.estimatedCost) || 0;
@@ -35,7 +36,8 @@ export function summarizeBudget(trip, dayCount, convert = sameOnly) {
 
   const byCurrency = {};
   const unconverted = new Set();
-  for (const item of trip.items) {
+  // A plan that uses a booking is counted through the booking, once.
+  for (const item of budgetEntries(trip)) {
     const cur = itemCurrency(item, trip);
     const exp = expectedCost(item);
     const rate = cur === trip.currency ? 1 : convert(1, cur, trip.currency);

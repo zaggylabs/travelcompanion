@@ -674,6 +674,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 
 /* Tabs: soft pills instead of an underline */
 .tabs { gap: 6px; border-bottom: 0; padding: 4px; background: var(--muted-bg); border-radius: 999px; width: fit-content; max-width: 100%; }
+.tabs { flex-wrap: wrap; border-radius: 22px; } /* six tabs wrap to a second line in the narrow middle column instead of hiding off the edge */
 .tabs button { margin: 0; padding: 7px 14px; border: 0; border-radius: 999px; font-weight: 700; transition: background 0.15s ease, color 0.15s ease; }
 .tabs button.active { background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
 
@@ -797,3 +798,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .idea-facts { margin-top: 2px; color: var(--fg); }
 .idea-facts .paid { color: var(--good); }
 .diet-tag { padding: 0 6px; border-radius: 99px; background: var(--accent-soft); font-weight: 600; }
+
+/* Bookings */
+.tabs button[data-tab="bookings"]::before { content: "🎟️"; }
+.tabs button[data-tab="bookings"].active { --tab: #d46a9f; }
+.has-booking .cost-part, .has-booking .add-chips [data-part="Cost"] { display: none; }
+.booking-pick .small { margin-top: 2px; }
+.booking-tag { color: var(--accent); font-weight: 600; }
+.booking-files { margin: 0; }
+.booking-card { cursor: default; align-items: flex-start; }
+.booking-card .item-meta a { color: var(--accent); }

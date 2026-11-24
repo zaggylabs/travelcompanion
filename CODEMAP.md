@@ -9,7 +9,7 @@ Plain static site: no build step, no API keys. The only server code is three Clo
 |---|---|
 | `index.html` | Page shell: header (Home currency button, theme toggle), `#app`, footer credits |
 | `assets/css/style.css` | All styles. Light/dark tokens at the top (white base, coral accent, Nunito + Fraunces from Google Fonts in `index.html`); "Cozy layer" at the end overrides shapes, tabs (emoji + colour per `data-tab`), category edge on plans (`cat-line-*`), shadows; trip page is 3 columns at ≥960px |
-| `assets/js/app.js` | All UI (`emptyState(icon, title, text)` for empty cards; `foldable()` hides optional fields behind "+ Link" chips) (≈2000 lines, plain DOM via `h()`). Sections, in order: home currency and rates, trip list, trip form (setup), trip view, Good to know, budget summary and to-pay list, itinerary, day 📍 picker, plan row, Saved places, Discover, attachments, plan form, place info panel, Budget tab |
+| `assets/js/app.js` | All UI (`emptyState(icon, title, text)` for empty cards; `foldable()` hides optional fields behind "+ Link" chips) (≈2000 lines, plain DOM via `h()`). Sections, in order: home currency and rates, trip list, trip form (setup), trip view, Good to know, budget summary and to-pay list, itinerary, day 📍 picker, plan row, Bookings tab (`bookingsView`, `bookingForm`), Saved places, Discover, attachments (`formFiles` is the in-form Attachments section for plans and bookings), plan form, place info panel, Budget tab |
 | `assets/js/autocomplete.js` | Suggestion dropdown used for countries and places |
 | `assets/js/theme.js` | Light/dark toggle (loaded before CSS) |
 | `assets/js/lib/*.js` | Logic with no DOM, unit tested in `tests/` |
@@ -36,7 +36,8 @@ Plain static site: no build step, no API keys. The only server code is three Clo
 | `guides.js` | Hand-written Good to know guides (visa, do's and don'ts, money, transport, links) |
 | `countryfacts.js` | Plugs, emergency numbers and driving side for every country |
 | `wikivoyage.js` | Wikivoyage sections for countries without a hand-written guide |
-| `budget.js` | Totals by category, day and person; paid logic; per-plan currency conversion |
+| `budget.js` | Totals by category, day and person; paid logic; per-plan currency conversion. Totals run over `budgetEntries(trip)` |
+| `bookings.js` | Bookings: `budgetEntries` (plans without a booking + each booking once, on its first plan's day), `bookingOf`, `plansUsing`, paid-by options |
 | `rates.js` | Home country/currency, exchange rates with cache |
 | `csv.js` | CSV parse, column matching, import and export |
 | `dates.js`, `money.js` | Date and money parsing and formatting |
@@ -57,7 +58,9 @@ Plain static site: no build step, no API keys. The only server code is three Clo
             location, category, estimatedCost, actualCost, paid,  // the form has one Cost: saves estimatedCost, actualCost null; older plans' cost = actualCost ?? estimatedCost (expectedCost)
             currency?,  // only when different from trip.currency
             travel?: { mode: "flight|train|bus|ferry|car", from, to, number, arrive, nextDay, fromAirport?, toAirport? (IATA), fromAirportName?, toAirportName? },  // Flights/Transport plans with a route; time = departure
+            bookingId?,  // uses a booking: its cost, paid and tickets count instead of the plan's own
             notes, link, place?: { name, osm?, lat, lon, kind, area, cc? }, fromIdea?, attachments?: [...] }],
+  bookings: [{ id, title, category, provider, confirmation, date, endDate, amount, currency?, paid, paidBy, link, notes, attachments? }],
   ideas: [{ id, title, group, location, link, bookingLink?, details?: { address, area, rating, ratingScale, reviews, stars, image, price }, notes, place?, createdAt,
              info?: { // by sub-tab (kindFields in app.js); empty fields left out
                // Hotels: checkIn, checkOut, pricePerNight, total, currency, confirmation, paid

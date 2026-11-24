@@ -13,6 +13,7 @@ import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
 import { browserGuess, convert, getRates, savedHome, saveHome } from "./lib/rates.js";
 import { expectedCost, isPaid, itemCurrency, setPaid, summarizeBudget } from "./lib/budget.js";
+import { BOOKING_SITES, PAID_BY, bookingOf, bookingsOf, budgetEntries, emptyBooking, plansUsing } from "./lib/bookings.js";
 import { csvToItems, itemsToCsv } from "./lib/csv.js";
 import { parseBookingLink } from "./lib/booking.js";
 import { airportCode, airportLabel, loadAirports, searchAirports } from "./lib/airports.js";
@@ -91,7 +92,7 @@ function formBusy() {
   const typing = root.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
   const draftIdea = Boolean(ui.addingIdea || root.querySelector(".idea-new input[name=title]")?.value);
   const newTrip = Boolean(root.querySelector("form.trip-form"));
-  return typing || newTrip || draftIdea || Boolean(ui.editingItem || ui.editingTrip || ui.editingIdea || ui.schedulingIdea || ui.editingBase);
+  return typing || newTrip || draftIdea || Boolean(ui.editingItem || ui.editingTrip || ui.editingIdea || ui.schedulingIdea || ui.editingBase || ui.editingBooking);
 }
 
 // Don't rebuild the page under someone who's typing; the summary can still update in place.
@@ -346,7 +347,7 @@ function field(label, control, cls) {
 function foldable(parts) {
   const chips = h("div", { class: "add-chips span-all" });
   const draw = () => {
-    chips.replaceChildren(...parts.filter((p) => p.els[0].hidden).map((p) => h("button", { class: "chip small plain", type: "button",
+    chips.replaceChildren(...parts.filter((p) => p.els[0].hidden).map((p) => h("button", { class: "chip small plain", type: "button", "data-part": p.label,
       onclick: () => { for (const el of p.els) el.hidden = false; draw(); p.els[0].querySelector("input:not([type=file]), textarea, select, button")?.focus(); } }, `+ ${p.label}`)));
     chips.hidden = !chips.childElementCount;
   };
@@ -671,16 +672,17 @@ function tripView(trip) {
       h("div", { class: "trip-main stack" },
         h("div", { class: "tabs", role: "tablist" }, Object.entries(TABS).map(([t, label]) =>
           h("button", { role: "tab", type: "button", "data-tab": t, "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
-            onclick: () => { Object.assign(ui, { tab: t, editingItem: null, attachOpen: null, editingIdea: null, schedulingIdea: null }); render(); } },
-            label, t === "ideas" && trip.ideas?.length ? h("span", { class: "tab-count num" }, trip.ideas.length) : null))),
-        ui.tab === "guide" ? guideView(trip) : ui.tab === "budget" ? budgetView(trip, days) : ui.tab === "ideas" ? ideasView(trip, days)
+            onclick: () => { Object.assign(ui, { tab: t, editingItem: null, attachOpen: null, editingIdea: null, schedulingIdea: null, editingBooking: null }); render(); } },
+            label, t === "ideas" && trip.ideas?.length ? h("span", { class: "tab-count num" }, trip.ideas.length)
+              : t === "bookings" && trip.bookings?.length ? h("span", { class: "tab-count num" }, trip.bookings.length) : null))),
+        ui.tab === "guide" ? guideView(trip) : ui.tab === "budget" ? budgetView(trip, days) : ui.tab === "ideas" ? ideasView(trip, days) : ui.tab === "bookings" ? bookingsView(trip, days)
           : ui.tab === "discover" ? discoverView(trip, days) : itineraryView(trip, days)),
       ui.tab === "discover"
         ? h("aside", { class: "trip-budget", "aria-label": "Popular places" }, popularPanel(trip, days))
         : h("aside", { class: "trip-budget", "aria-label": "Budget" }, budgetSummary(trip, days))));
 }
 
-const TABS = { itinerary: "Itinerary", discover: "Discover", ideas: "Saved places", budget: "Budget", guide: "Good to know" };
+const TABS = { itinerary: "Itinerary", discover: "Discover", ideas: "Saved places", bookings: "Bookings", budget: "Budget", guide: "Good to know" };
 
 /* ----- "Good to know" tab: entry rules, etiquette, money, plugs, emergency numbers ----- */
 
@@ -941,7 +943,7 @@ function summaryContent(trip, days, draft) {
 
 /** Every plan with a cost, in itinerary order, as a checklist: tick it when it's paid. */
 function toPayList(trip, days) {
-  const rows = orderedItems(trip, days).filter((i) => expectedCost(i) > 0 || isPaid(i));
+  const rows = orderedItems({ items: budgetEntries(trip) }, days).filter((i) => expectedCost(i) > 0 || isPaid(i));
   if (!rows.length) return null;
   const left = rows.filter((i) => !isPaid(i)).length;
   const dayLabel = (d) => {
@@ -951,7 +953,9 @@ function toPayList(trip, days) {
   };
   const toggle = (item, paid) => {
     const fresh = loadTrips().find((t) => t.id === trip.id) ?? trip;
-    const next = { ...fresh, items: fresh.items.map((i) => (i.id === item.id ? setPaid(i, paid) : i)) };
+    const next = item.booking
+      ? { ...fresh, bookings: bookingsOf(fresh).map((b) => (b.id === item.id ? { ...b, paid } : b)) }
+      : { ...fresh, items: fresh.items.map((i) => (i.id === item.id ? setPaid(i, paid) : i)) };
     saveTrip(next);
     // Don't wipe a plan that's being edited: just refresh the summary.
     if (ui.editingItem && activeSummary?.box.isConnected) activeSummary.update(next);
@@ -971,7 +975,7 @@ function toPayList(trip, days) {
           box,
           h("span", { class: "pay-main" },
             h("span", { class: "pay-title" }, item.title),
-            h("span", { class: "small muted" }, h("i", { class: `dot cat-${item.category}` }), dayLabel(item.date))),
+            h("span", { class: "small muted" }, h("i", { class: `dot cat-${item.category}` }), item.booking ? "🎟️ Booking · " : "", dayLabel(item.date))),
           h("span", { class: "pay-amt" },
             h("span", { class: "num" }, formatMoney(amount, cur)),
             alt(amount, cur))));
@@ -1070,12 +1074,14 @@ function itineraryView(trip, days) {
   };
   const cancel = () => { ui.editingItem = null; render(); };
   const selected = selectedItem(trip, days);
+  const byDay = summarize(trip, days.length).byDay;
 
   return h("div", { class: "stack" },
     days.length === 0 && h("p", { class: "hint" }, "Set start and end dates in Edit trip to get a day-by-day plan."),
     groups.map((g) => {
       // In the trip's currency; plans in other currencies are converted (and skipped if there's no rate).
-      const total = g.items.reduce((a, i) => a + (convertAmount(expectedCost(i), itemCurrency(i, trip), trip.currency) ?? 0), 0);
+      // A booking counts on the day of the first plan that uses it.
+      const total = byDay[g.key] ?? 0;
       const e = ui.editingItem;
       return h("section", { class: "day", "aria-label": g.label },
         h("div", { class: "day-head" },
@@ -1229,7 +1235,7 @@ const pencilIcon = () => {
 const editItem = (item) => { Object.assign(ui, { editingItem: { mode: "edit", id: item.id }, selectedItem: item.id, attachOpen: null }); render(); };
 
 function itemRow(item, trip, selected) {
-  const files = item.attachments ?? [];
+  const files = [...(item.attachments ?? []), ...(bookingOf(trip, item)?.attachments ?? [])];
   const open = ui.attachOpen === item.id;
   return h("div", { class: `item-wrap${open ? " open" : ""}${selected ? " selected" : ""}` },
     itemButton(item, trip, selected),
@@ -1248,6 +1254,7 @@ function itemRow(item, trip, selected) {
 
 // Clicking a plan shows its place info; clicking it again (or the pencil) edits it.
 function itemButton(item, trip, selected) {
+  const booking = bookingOf(trip, item);
   return h("button", {
     class: `item${item.travel ? " cat-line-Flights" : ` cat-line-${item.category}`}`, type: "button", "aria-pressed": String(Boolean(selected)),
     title: selected ? "Click again to edit" : "Show info about this place",
@@ -1266,13 +1273,156 @@ function itemButton(item, trip, selected) {
           : h("span", null, h("i", { class: `dot cat-${item.category}` }), item.category),
         !item.travel && item.location && h("span", null, item.location),
         item.notes && h("em", null, item.notes),
-        item.link && h("span", null, "🔗"))),
-    h("span", { class: "item-cost num" },
+        item.link && h("span", null, "🔗"),
+        booking && h("span", { class: "booking-tag" }, "🎟️ ", booking.title))),
+    booking ? bookingCost(booking, trip) : h("span", { class: "item-cost num" },
       expectedCost(item) > 0 || isPaid(item)
         ? [formatMoney(expectedCost(item), itemCurrency(item, trip)), alt(expectedCost(item), itemCurrency(item, trip)),
            isPaid(item) ? h("small", { class: "paid" }, "✓ Paid")
              : h("small", { class: "muted" }, "To pay")]
         : ""));
+}
+
+/* ----- bookings: what's booked and paid, with its tickets; plans can point at one ----- */
+
+// The cost column for a booking (on its card, and on plans that use it).
+function bookingCost(b, trip) {
+  const amount = Number(b.amount) || 0;
+  const cur = b.currency || trip.currency;
+  return h("span", { class: "item-cost num" },
+    amount > 0 || b.paid
+      ? [formatMoney(amount, cur), alt(amount, cur),
+         b.paid ? h("small", { class: "paid" }, "✓ Paid", b.paidBy ? ` · ${b.paidBy}` : "") : h("small", { class: "muted" }, "To pay")]
+      : "");
+}
+
+function saveBookings(tripId, fn) {
+  const trip = loadTrips().find((t) => t.id === tripId);
+  if (trip) saveTrip({ ...trip, bookings: fn(bookingsOf(trip)) });
+}
+
+function bookingsView(trip, days) {
+  const first = (b) => plansUsing(trip, b).map((p) => p.date).filter(Boolean).sort()[0] || b.date || "9";
+  const list = [...bookingsOf(trip)].sort((a, b) => first(a).localeCompare(first(b)));
+  const done = () => { ui.editingBooking = null; render(); };
+  const save = (b) => { saveBookings(trip.id, (all) => (all.some((x) => x.id === b.id) ? all.map((x) => (x.id === b.id ? b : x)) : [...all, b])); done(); };
+  const remove = (b) => {
+    const t = loadTrips().find((x) => x.id === trip.id) ?? trip;
+    // Plans that used it keep going, just without the booking.
+    saveTrip({ ...t, bookings: bookingsOf(t).filter((x) => x.id !== b.id),
+      items: t.items.map((i) => { if (i.bookingId !== b.id) return i; const { bookingId: _b, ...rest } = i; return rest; }) });
+    deleteItemFiles(b.id);
+    done();
+  };
+  const adding = ui.editingBooking === "new";
+  return h("div", { class: "stack bookings" },
+    h("div", { class: "ideas-head" },
+      h("h2", null, "Bookings"),
+      h("p", { class: "small muted" }, "Keep what you've booked here: how much, how it was paid, and the tickets. In a plan, press ",
+        h("strong", null, "+ Booking"), " to use one. The plan then shows its tickets and cost, and the budget counts it once.")),
+    adding
+      ? h("div", { class: "card pad idea-new" }, h("h3", null, "🎟️ New booking"), bookingForm(emptyBooking(), trip, save, done))
+      : h("button", { class: "btn primary idea-add-btn", type: "button", onclick: () => { Object.assign(ui, { editingBooking: "new", attachOpen: null }); render(); } }, "＋ Add a booking"),
+    list.length === 0
+      ? !adding && emptyState("🎟️", "No bookings yet", "Add hotel stays, flights, theme park tickets or tours once they're booked, with their confirmation and tickets.")
+      : h("ul", { class: "items" }, list.map((b) => h("li", null, ui.editingBooking === b.id
+          ? bookingForm(b, trip, save, done, () => remove(b))
+          : [bookingRow(b, trip, days), ui.attachOpen === b.id && attachPanel(b, trip)]))));
+}
+
+function bookingRow(b, trip, days) {
+  const files = b.attachments ?? [];
+  const open = ui.attachOpen === b.id;
+  const plans = plansUsing(trip, b).sort((x, y) => (x.date || "9").localeCompare(y.date || "9") || byTime(x, y));
+  const when = b.date && (b.endDate && b.endDate !== b.date ? `${shortDay(b.date)} to ${shortDay(b.endDate)}` : shortDay(b.date));
+  const edit = () => { Object.assign(ui, { editingBooking: b.id, attachOpen: null }); render(); };
+  return h("div", { class: `item-wrap${open ? " open" : ""}` },
+    h("div", { class: `item booking-card cat-line-${b.category}` },
+      h("span", { class: "item-main" },
+        h("span", { class: "item-title" }, b.title),
+        h("span", { class: "item-meta" },
+          h("span", null, h("i", { class: `dot cat-${b.category}` }), b.category),
+          when && h("span", null, when),
+          b.provider && h("span", null, b.provider),
+          b.confirmation && h("span", null, "Ref ", h("span", { class: "num" }, b.confirmation)),
+          b.link && h("a", { href: b.link, target: "_blank", rel: "noopener" }, "Open booking ↗"),
+          b.notes && h("em", null, b.notes)),
+        h("span", { class: "idea-plans" }, plans.length
+          ? plans.map((p) => h("button", { class: "idea-plan", type: "button", title: "Show it in the itinerary", onclick: () => goToPlan(p.id) },
+              "✓ ", p.title, " · ", dayLabel(p.date, days)))
+          : h("span", { class: "small muted" }, "Not in the itinerary yet. Pick it in a plan with + Booking."))),
+      bookingCost(b, trip)),
+    h("button", { class: "attach-btn", type: "button", "aria-label": `Edit ${b.title}`, title: "Edit booking", onclick: edit }, pencilIcon()),
+    h("button", {
+      class: `attach-btn${files.length ? " has" : ""}`, type: "button", "aria-expanded": String(open),
+      "aria-label": `Tickets for ${b.title}${files.length ? ` (${files.length})` : ""}`,
+      title: files.length ? plural(files.length, "attachment") : "Attach tickets or files",
+      onclick: () => { Object.assign(ui, { attachOpen: open ? null : b.id, attachError: null, confirmRemoveFile: null, editingBooking: null }); render(); },
+    }, clipIcon(), files.length ? h("span", { class: "num" }, files.length) : null));
+}
+
+function bookingForm(b, trip, onSave, onCancel, onDelete) {
+  const isNew = !onDelete;
+  const startCur = b.currency || trip.currency;
+  const curOptions = [...new Set([startCur, trip.currency, ...tripCountries(trip).map(currencyForCountry), home.currency, ...ALL_CURRENCIES].filter(Boolean))];
+  const currencySelect = h("select", { name: "currency", "aria-label": "Currency" }, curOptions.map((c) => h("option", { selected: c === startCur }, c)));
+  const amount = costField("Amount", h("input", { name: "amount", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: Number(b.amount) || "" }), () => currencySelect.value);
+  currencySelect.addEventListener("change", amount.update);
+  const titleInput = h("input", { name: "title", value: b.title, placeholder: "e.g. Tokyo Disneyland 1-Day Passport", autocomplete: "off" });
+  const sites = `sites-${b.id}`;
+  const files = formFiles(b);
+  const form = h("form", { class: "card pad form-grid six editing" },
+    field("What", titleInput, "span-4"),
+    field("Type", h("select", { name: "category" }, CATEGORIES.map((c) => h("option", { selected: c === b.category }, c))), "span-2"),
+    field("Booked on", h("input", { name: "provider", list: sites, value: b.provider, placeholder: "e.g. Klook" }), "span-3"),
+    h("datalist", { id: sites }, BOOKING_SITES.map((x) => h("option", { value: x }))),
+    field("Confirmation no.", h("input", { name: "confirmation", value: b.confirmation, placeholder: "Optional" }), "span-3"),
+    field("Date", h("input", { name: "date", type: "date", value: b.date }), "span-2"),
+    field("Until (optional)", h("input", { name: "endDate", type: "date", value: b.endDate }), "span-2"),
+    field("Paid by", h("select", { name: "paidBy" }, h("option", { value: "" }, "Not set"), PAID_BY.map((x) => h("option", { selected: x === b.paidBy }, x))), "span-2"),
+    amount.el,
+    field("Currency", currencySelect, "span-1"),
+    h("label", { class: "check span-3 next-day" }, h("input", { type: "checkbox", name: "paid", checked: Boolean(b.paid) }), h("span", null, "Paid")),
+    files.el,
+    foldable([
+      { label: "Link", el: field("Link", h("input", { name: "link", type: "url", placeholder: "https://", value: b.link }), "span-all"), open: Boolean(b.link) },
+      { label: "Notes", el: field("Notes", h("textarea", { name: "notes", rows: 2 }, b.notes), "span-all"), open: Boolean(b.notes?.trim()) }]),
+    h("div", { class: "actions span-all" },
+      h("button", { class: "btn primary", type: "submit" }, isNew ? "Save booking" : "Save"),
+      h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
+      onDelete && h("button", { class: "btn danger push", type: "button", onclick: onDelete }, "Delete")));
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (form.dataset.saving) return;
+    const f = new FormData(form);
+    const title = String(f.get("title")).trim();
+    if (!title) { titleInput.focus(); return; }
+    let attachments = b.attachments ?? [];
+    if (files.changed()) {
+      form.dataset.saving = "1";
+      attachments = await files.commit(trip.id, b.id);
+      delete form.dataset.saving;
+      if (!attachments) return;
+    }
+    const cur = String(f.get("currency"));
+    const { currency: _c, attachments: _a, pendingFiles: _p, removingFiles: _r, ...rest } = b;
+    onSave({
+      ...rest, title,
+      category: String(f.get("category")),
+      provider: String(f.get("provider")).trim(),
+      confirmation: String(f.get("confirmation")).trim(),
+      date: String(f.get("date") ?? ""), endDate: String(f.get("endDate") ?? ""),
+      paidBy: String(f.get("paidBy") ?? ""),
+      amount: Math.max(0, Number(f.get("amount")) || 0),
+      ...(cur !== trip.currency ? { currency: cur } : {}),
+      paid: f.get("paid") === "on",
+      link: String(f.get("link") ?? "").trim(),
+      notes: String(f.get("notes") ?? ""),
+      ...(attachments.length ? { attachments } : {}),
+    });
+  });
+  queueMicrotask(() => { if (isNew) titleInput.focus(); });
+  return form;
 }
 
 /* ----- saved places: a scratchpad of places, each one a click away from the itinerary ----- */
@@ -2270,7 +2420,8 @@ function revokeFileUrls() {
 function updateAttachments(tripId, itemId, fn) {
   const trip = loadTrips().find((t) => t.id === tripId);
   if (!trip) return;
-  saveTrip({ ...trip, items: trip.items.map((i) => (i.id === itemId ? { ...i, attachments: fn(i.attachments ?? []) } : i)) });
+  const upd = (i) => (i.id === itemId ? { ...i, attachments: fn(i.attachments ?? []) } : i);
+  saveTrip({ ...trip, items: trip.items.map(upd), ...(trip.bookings ? { bookings: trip.bookings.map(upd) } : {}) });
 }
 
 async function addAttachments(trip, item, fileList) {
@@ -2317,7 +2468,7 @@ function attachPanel(item, trip) {
     input.value = "";
   });
 
-  const rows = files.map((f) => {
+  const rowFor = (f, own) => {
     const isImage = f.type.startsWith("image/");
     const thumb = h("span", { class: "file-thumb" }, isImage ? "" : "PDF");
     const name = h("a", { class: "file-name", target: "_blank", rel: "noopener" }, f.name);
@@ -2344,17 +2495,23 @@ function attachPanel(item, trip) {
     return h("li", { class: "file" },
       thumbLink,
       h("span", { class: "file-main" }, name, status),
-      confirming
+      !own ? null : confirming
         ? h("span", { class: "actions" },
             h("button", { class: "btn danger", type: "button", onclick: () => removeAttachment(trip, item, f.id) }, "Remove"),
             h("button", { class: "btn", type: "button", onclick: () => { ui.confirmRemoveFile = null; render(); } }, "Keep"))
         : h("button", { class: "btn ghost", type: "button", "aria-label": `Remove ${f.name}`, onclick: () => { ui.confirmRemoveFile = f.id; render(); } }, "Remove"));
-  });
+  };
+  const rows = files.map((f) => rowFor(f, true));
+  // A plan that uses a booking shows the booking's documents too (they're edited in Bookings).
+  const booking = bookingOf(trip, item);
+  const bookingFiles = (booking?.attachments ?? []).map((f) => rowFor(f, false));
 
   const panel = h("div", { class: "attach-panel card", role: "region", "aria-label": `Attachments for ${item.title}` },
+    bookingFiles.length > 0 && h("p", { class: "small muted booking-files" }, "🎟️ From the booking ", h("strong", null, booking.title)),
+    bookingFiles.length > 0 && h("ul", { class: "files" }, bookingFiles),
     files.length
       ? h("ul", { class: "files" }, rows)
-      : h("p", { class: "small muted" }, "Nothing tucked in here yet. Add tickets, booking confirmations or screenshots (images or PDFs)."),
+      : !bookingFiles.length && h("p", { class: "small muted" }, "Nothing tucked in here yet. Add tickets, booking confirmations or screenshots (images or PDFs)."),
     ui.attachError && h("p", { class: "error" }, ui.attachError),
     h("div", { class: "actions" },
       h("button", { class: "btn", type: "button", disabled: ui.attachBusy, onclick: () => input.click() },
@@ -2370,6 +2527,59 @@ function attachPanel(item, trip) {
     if (e.dataTransfer?.files?.length && !ui.attachBusy) addAttachments(trip, item, e.dataTransfer.files);
   });
   return panel;
+}
+
+// The Attachments section of a form (plans and bookings). New files wait in memory and removals
+// wait until `commit` on Save; Cancel drops both.
+function formFiles(item) {
+  const pending = [...(item.pendingFiles ?? [])];
+  const removing = new Set(item.removingFiles ?? []);
+  const filesBox = h("div", { class: "field span-all form-files" });
+  const fileInput = h("input", { type: "file", accept: ACCEPT, multiple: true, hidden: true, "aria-label": "Files to attach" });
+  let fileError = "";
+  const addFiles = (list) => {
+    const all = [...list];
+    const bad = all.filter((f) => !isAllowedType(f) || f.size > MAX_FILE_BYTES);
+    pending.push(...all.filter((f) => !bad.includes(f)));
+    fileError = bad.length ? `Only images and PDFs under ${formatSize(MAX_FILE_BYTES)} can be attached (skipped ${bad.map((f) => f.name).join(", ")}).` : "";
+    drawFiles();
+  };
+  fileInput.addEventListener("change", () => { if (fileInput.files?.length) addFiles(fileInput.files); fileInput.value = ""; });
+  function drawFiles() {
+    const saved = item.attachments ?? [];
+    const row = (name, size, note, button) => h("li", { class: "file" }, h("span", { class: "file-main" }, h("span", { class: "file-name" }, name), h("span", { class: "small muted" }, [formatSize(size), note].filter(Boolean).join(" · "))), button);
+    filesBox.replaceChildren(...[
+      h("span", null, "Attachments"),
+      (saved.length || pending.length) ? h("ul", { class: "files" },
+        saved.map((f) => removing.has(f.id)
+          ? row(h("s", null, f.name), f.size, "removed when you save", h("button", { class: "btn ghost", type: "button", onclick: () => { removing.delete(f.id); drawFiles(); } }, "Undo"))
+          : row(f.name, f.size, "", h("button", { class: "btn ghost", type: "button", "aria-label": `Remove ${f.name}`, onclick: () => { removing.add(f.id); drawFiles(); } }, "Remove"))),
+        pending.map((f) => row(f.name, f.size, "added when you save", h("button", { class: "btn ghost", type: "button", "aria-label": `Remove ${f.name}`, onclick: () => { pending.splice(pending.indexOf(f), 1); drawFiles(); } }, "Remove")))) : null,
+      fileError && h("p", { class: "error" }, fileError),
+      h("div", { class: "actions" },
+        h("button", { class: "btn", type: "button", onclick: () => fileInput.click() }, clipIcon(), "Attach file"),
+        h("span", { class: "small muted" }, "Tickets, bookings or screenshots (images or PDFs). Saved in this browser only."),
+        fileInput)].filter(Boolean)); // replaceChildren would print a null as "null"
+  }
+  drawFiles();
+  filesBox.addEventListener("dragover", (e) => { e.preventDefault(); filesBox.classList.add("drop"); });
+  filesBox.addEventListener("dragleave", () => filesBox.classList.remove("drop"));
+  filesBox.addEventListener("drop", (e) => { e.preventDefault(); filesBox.classList.remove("drop"); if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files); });
+  // Stores new files and deletes removed ones. Returns the attachment list, or null if storing failed.
+  async function commit(tripId, itemId) {
+    const attachments = (item.attachments ?? []).filter((a) => !removing.has(a.id));
+    if (pending.length) requestPersistence();
+    try {
+      for (const file of pending) attachments.push(await putFile({ id: newId(), tripId, itemId, file }));
+    } catch {
+      fileError = "Couldn't save the files in this browser (private browsing or full storage can block it). Remove them to save.";
+      drawFiles();
+      return null;
+    }
+    for (const id of removing) await deleteFile(id).catch(() => {});
+    return attachments;
+  }
+  return { el: filesBox, pending, removing, commit, changed: () => pending.length > 0 || removing.size > 0 };
 }
 
 // A cost input with a live "≈ S$12.30" under it while typing. `currency()` is read each time, as it can change.
@@ -2408,39 +2618,9 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   const isNew = !trip.items.some((i) => i.id === item.id);
 
   // Attachments: new files wait in memory and removals wait until Save; Cancel drops both.
-  const pending = [...(item.pendingFiles ?? [])];
-  const removing = new Set(item.removingFiles ?? []);
-  const filesBox = h("div", { class: "field span-all form-files" });
-  const fileInput = h("input", { type: "file", accept: ACCEPT, multiple: true, hidden: true, "aria-label": "Files to attach" });
-  let fileError = "";
-  const addFiles = (list) => {
-    const all = [...list];
-    const bad = all.filter((f) => !isAllowedType(f) || f.size > MAX_FILE_BYTES);
-    pending.push(...all.filter((f) => !bad.includes(f)));
-    fileError = bad.length ? `Only images and PDFs under ${formatSize(MAX_FILE_BYTES)} can be attached (skipped ${bad.map((f) => f.name).join(", ")}).` : "";
-    drawFiles();
-  };
-  fileInput.addEventListener("change", () => { if (fileInput.files?.length) addFiles(fileInput.files); fileInput.value = ""; });
-  function drawFiles() {
-    const saved = item.attachments ?? [];
-    const row = (name, size, note, button) => h("li", { class: "file" }, h("span", { class: "file-main" }, h("span", { class: "file-name" }, name), h("span", { class: "small muted" }, [formatSize(size), note].filter(Boolean).join(" · "))), button);
-    filesBox.replaceChildren(...[
-      h("span", null, "Attachments"),
-      (saved.length || pending.length) ? h("ul", { class: "files" },
-        saved.map((f) => removing.has(f.id)
-          ? row(h("s", null, f.name), f.size, "removed when you save", h("button", { class: "btn ghost", type: "button", onclick: () => { removing.delete(f.id); drawFiles(); } }, "Undo"))
-          : row(f.name, f.size, "", h("button", { class: "btn ghost", type: "button", "aria-label": `Remove ${f.name}`, onclick: () => { removing.add(f.id); drawFiles(); } }, "Remove"))),
-        pending.map((f) => row(f.name, f.size, "added when you save", h("button", { class: "btn ghost", type: "button", "aria-label": `Remove ${f.name}`, onclick: () => { pending.splice(pending.indexOf(f), 1); drawFiles(); } }, "Remove")))) : null,
-      fileError && h("p", { class: "error" }, fileError),
-      h("div", { class: "actions" },
-        h("button", { class: "btn", type: "button", onclick: () => fileInput.click() }, clipIcon(), "Attach file"),
-        h("span", { class: "small muted" }, "Tickets, bookings or screenshots (images or PDFs). Saved in this browser only."),
-        fileInput)].filter(Boolean)); // replaceChildren would print a null as "null"
-  }
-  drawFiles();
-  filesBox.addEventListener("dragover", (e) => { e.preventDefault(); filesBox.classList.add("drop"); });
-  filesBox.addEventListener("dragleave", () => filesBox.classList.remove("drop"));
-  filesBox.addEventListener("drop", (e) => { e.preventDefault(); filesBox.classList.remove("drop"); if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files); });
+  const files = formFiles(item);
+  const { pending, removing } = files;
+  const filesBox = files.el;
   // Travel is usually booked (and paid) from home, so it starts in the home currency.
   const startCur = isNew && !item.currency ? (isTravel ? home.currency : planCurrency(trip, country?.code)) : itemCurrency(item, trip);
   const curOptions = [...new Set([startCur, trip.currency, ...ccs.map(currencyForCountry), home.currency, ...ALL_CURRENCIES].filter(Boolean))];
@@ -2578,6 +2758,17 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     h("label", { class: "check span-2 next-day wide" }, h("input", { type: "checkbox", name: "nextDay", checked: Boolean(t.nextDay) }), h("span", null, "Arrives the next day")),
   ] : [];
 
+  // "Choose booking": the plan then takes its cost, paid status and tickets from that booking.
+  const linked = bookingOf(trip, item);
+  const bookings = bookingsOf(trip);
+  const readBookingId = (f) => String(f.get("bookingId") ?? "") || undefined;
+  const bookingSelect = h("select", { name: "bookingId", disabled: !bookings.length },
+    h("option", { value: "" }, bookings.length ? "None" : "No bookings yet. Add them in the Bookings tab"),
+    bookings.map((b) => h("option", { value: b.id, selected: b.id === linked?.id },
+      [b.title, b.amount > 0 && formatMoney(Number(b.amount), b.currency || trip.currency)].filter(Boolean).join(" · "))));
+  const bookingField = field("Booking", bookingSelect, "span-all booking-pick");
+  bookingField.append(h("span", { class: "small muted" }, "Its cost, paid status and tickets are used for this plan, and the budget counts it once."));
+
   // Changing to or from Flights / Transport redraws the form in the other layout, keeping what's been typed.
   const switchKind = (category) => {
     const f = new FormData(form);
@@ -2597,7 +2788,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       link: String(f.get("link") ?? "").trim(),
       notes: String(f.get("notes") ?? ""),
       ...(currencyTouched && !isTravel ? { currency: currencySelect.value } : {}),
-      pendingFiles: pending, removingFiles: [...removing],
+      pendingFiles: pending, removingFiles: [...removing], bookingId: readBookingId(f),
       ...(travel ? { travel: {
         mode: category === "Flights" ? "flight" : groundMode,
         from: String(f.get("from") ?? "").trim(), to: String(f.get("to") ?? "").trim(), number: String(f.get("number") ?? "").trim(),
@@ -2616,10 +2807,11 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     !isTravel && field("Where", locationInput, "span-3"),
     isTravel ? travelFields : [dayField("span-2"), field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1")],
     foldable([
+      { label: "Booking", open: Boolean(linked), el: bookingField },
       // Flights and stays nearly always cost something; other plans often don't.
       { label: "Cost", open: expectedCost(item) > 0 || ["Flights", "Lodging"].includes(item.category),
-        els: [costInput.el, field("Currency", currencySelect, "span-1"),
-          h("label", { class: "check span-all" }, paidBox, h("span", null, "Paid"), h("span", { class: "small muted" }, " · ticks it off the to-pay list on the right"))] },
+        els: [costInput.el, field("Currency", currencySelect, "span-1 cost-part"),
+          h("label", { class: "check span-all cost-part" }, paidBox, h("span", null, "Paid"), h("span", { class: "small muted" }, " · ticks it off the to-pay list on the right"))] },
       { label: "Link", el: field("Link", linkInput, "span-all"), open: Boolean(item.link) },
       { label: "Notes", el: field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"), open: Boolean(item.notes?.trim()) },
       { label: "Attachment", el: filesBox, open: Boolean(item.attachments?.length || pending.length) }]),
@@ -2628,6 +2820,11 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
       onDelete && h("button", { class: "btn danger push", type: "button", onclick: onDelete }, "Delete")));
   form.addEventListener("change", (e) => { if (e.target.name === "date") setDay(e.target.value); });
+  costInput.el.classList.add("cost-part");
+  // With a booking picked, the plan's own cost is hidden: the booking's is used.
+  const syncBooking = () => form.classList.toggle("has-booking", Boolean(bookingSelect.value));
+  bookingSelect.addEventListener("change", syncBooking);
+  syncBooking();
   // Typing a cost or changing the day updates the budget summary right away, before saving.
   form.addEventListener("input", () => {
     if (!activeSummary?.box.isConnected) return;
@@ -2636,6 +2833,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       ...withCurrency(item, String(f.get("currency")), trip),
       category: String(f.get("category")),
       date: String(f.get("date") ?? ""),
+      bookingId: readBookingId(f),
       estimatedCost: readCost(f),
       actualCost: null,
       paid: paidBox.checked,
@@ -2663,21 +2861,12 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     if (!title) { titleInput.focus(); return; }
     // Store new files and drop removed ones before saving the plan.
     let attachments = (item.attachments ?? []).filter((a) => !removing.has(a.id));
-    if (pending.length || removing.size) {
+    if (files.changed()) {
       form.dataset.saving = "1";
       const saveBtn = form.querySelector("button[type=submit]");
       if (saveBtn) saveBtn.textContent = "Saving…";
-      if (pending.length) requestPersistence();
-      try {
-        for (const file of pending) attachments.push(await putFile({ id: newId(), tripId: trip.id, itemId: item.id, file }));
-      } catch {
-        delete form.dataset.saving;
-        if (saveBtn) saveBtn.textContent = "Save";
-        fileError = "Couldn't save the files in this browser (private browsing or full storage can block it). Remove them to save the plan.";
-        drawFiles();
-        return;
-      }
-      for (const id of removing) await deleteFile(id).catch(() => {});
+      attachments = await files.commit(trip.id, item.id);
+      if (!attachments) { delete form.dataset.saving; if (saveBtn) saveBtn.textContent = "Save"; return; }
     }
     const { travel: _old, place: _p, pendingFiles: _pf, removingFiles: _rf, attachments: _a, ...base } = withCurrency(item, String(f.get("currency")), trip);
     onSave({
@@ -2690,6 +2879,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       time: String(f.get("time") ?? ""),
       location: travel ? routeText(travel) : isTravel ? "" : String(f.get("location")).trim(),
       ...(travel ? { travel } : {}),
+      bookingId: readBookingId(f),
       estimatedCost: readCost(f),
       actualCost: null,
       paid: paidBox.checked,
