@@ -4,6 +4,12 @@ import { round2 } from "./money.js";
 /** What an item will end up costing: the actual amount once paid, otherwise the estimate. */
 export const expectedCost = (item) => (item.actualCost ?? item.estimatedCost) || 0;
 
+/** Ticked off as paid. Plans saved before the checkbox existed count as paid when they have an actual cost. */
+export const isPaid = (item) => item.paid ?? (item.actualCost !== null && item.actualCost !== undefined);
+
+/** What ticking (or unticking) "paid" does to a plan: an empty actual cost takes the estimate. */
+export const setPaid = (item, paid) => ({ ...item, paid, actualCost: paid && (item.actualCost === null || item.actualCost === undefined) ? item.estimatedCost || 0 : item.actualCost });
+
 export function summarizeBudget(trip, dayCount) {
   const byDay = {};
   const categories = CATEGORIES.map((category) => ({
@@ -18,7 +24,7 @@ export function summarizeBudget(trip, dayCount) {
   for (const item of trip.items) {
     const row = byCat.get(item.category) ?? byCat.get("Other");
     row.planned += item.estimatedCost || 0;
-    row.spent += item.actualCost ?? 0;
+    row.spent += isPaid(item) ? expectedCost(item) : 0;
     row.projected += expectedCost(item);
     byDay[item.date] = (byDay[item.date] ?? 0) + expectedCost(item);
   }

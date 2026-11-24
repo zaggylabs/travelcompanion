@@ -120,3 +120,18 @@ test("parseMoney", () => {
     ["(20)", -20], ["", null], ["n/a", null],
   ]) assert.equal(parseMoney(input), expected, input);
 });
+
+test("paid is an explicit checkbox, with older plans migrated from their actual cost", async () => {
+  const { isPaid, setPaid, summarizeBudget } = await import("../assets/js/lib/budget.js");
+  const base = { id: "x", date: "", time: "", title: "Hotel", location: "", category: "Lodging", estimatedCost: 300, actualCost: null, notes: "", link: "" };
+  assert.equal(isPaid(base), false);
+  assert.equal(isPaid({ ...base, actualCost: 280 }), true); // saved before the checkbox existed
+  assert.equal(isPaid({ ...base, actualCost: 280, paid: false }), false);
+  const ticked = setPaid(base, true);
+  assert.deepEqual([ticked.paid, ticked.actualCost], [true, 300]); // empty actual takes the estimate
+  assert.equal(setPaid({ ...base, actualCost: 280 }, true).actualCost, 280);
+  const trip = { travelers: 1, budget: {}, items: [{ ...base, actualCost: 280, paid: false }, { ...base, id: "y", paid: true }] };
+  const s = summarizeBudget(trip, 0);
+  assert.equal(s.totalProjected, 580);
+  assert.equal(s.totalSpent, 300); // only the ticked one
+});

@@ -10,7 +10,7 @@ import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
 import { browserGuess, convert, getRates, savedHome, saveHome } from "./lib/rates.js";
-import { expectedCost, summarizeBudget } from "./lib/budget.js";
+import { expectedCost, isPaid, setPaid, summarizeBudget } from "./lib/budget.js";
 import { csvToItems, itemsToCsv } from "./lib/csv.js";
 import { IDEA_GROUPS, emptyIdea, groupForPlace, groupIdeas, groupOf, ideaToItem } from "./lib/ideas.js";
 import { deleteTrip, loadTrips, saveTrip, STORAGE_KEY } from "./lib/store.js";
@@ -54,6 +54,7 @@ const ui = {
   attachError: null,
   confirmRemoveFile: null, // attachment id awaiting "Remove?" confirmation
   selectedItem: null, // plan whose place info shows in the info panel
+  summaryMore: false, // budget breakdown opened in the right column
   homeOpen: false, // home currency settings card
   selectedIdea: null, // saved place whose info shows in the info panel
   editingIdea: null, // saved place id being edited
@@ -536,7 +537,7 @@ function summaryContent(trip, days, draft) {
   if (s.totalProjected === 0 && s.totalSpent === 0) {
     return [h("div", { class: "summary-body" },
       h("h2", null, "Budget"),
-      h("p", { class: "small muted" }, "Add a cost to any plan and your running total, spending by category and per-day costs show up here, updating as you go."))];
+      h("p", { class: "small muted" }, "Add a cost to any plan and it shows up here as a to-pay checklist. Tick things off as you pay for them."))];
   }
 
   return [h("div", { class: "summary-body" },
@@ -556,6 +557,9 @@ function summaryContent(trip, days, draft) {
       homeText(Math.abs(s.remaining), trip.currency) && ` (${homeText(Math.abs(s.remaining), trip.currency)})`),
     hasBudget && !cats.every((c) => c.budget !== null) && cats.filter((c) => c.budget !== null && c.projected > c.budget).map((c) =>
       h("p", { class: "small bad strong" }, `${c.category} is ${money(c.projected - c.budget)} over its ${money(c.budget)} limit`)),
+    toPayList(trip, days),
+    h("details", { class: "summary-more", open: ui.summaryMore, ontoggle: (e) => { ui.summaryMore = e.currentTarget.open; } },
+      h("summary", null, "Breakdown by category and day"),
     h("section", { class: "summary-sec" },
       h("h3", null, "By category"),
       h("ul", { class: "summary-list" }, cats.map((c) => h("li", null,
@@ -571,9 +575,47 @@ function summaryContent(trip, days, draft) {
       h("ul", { class: "summary-days" }, dayRows.map((r) => h("li", { class: r.v ? "" : "zero" },
         h("span", null, r.label, r.sub && h("span", { class: "muted" }, ` ${r.sub}`)),
         h("span", { class: "bar thin" }, h("span", { style: `width:${pct(r.v, maxDay)}` })),
-        h("span", { class: "num", title: r.v ? homeText(r.v, trip.currency) || null : null }, r.v ? money(r.v) : "–"))))),
+        h("span", { class: "num", title: r.v ? homeText(r.v, trip.currency) || null : null }, r.v ? money(r.v) : "–")))))),
     rateNote(trip),
     ui.tab !== "budget" && h("button", { class: "btn", type: "button", onclick: goBudget }, hasBudget ? "Budget limits" : "Set budget limits"))];
+}
+
+/** Every plan with a cost, in itinerary order, as a checklist: tick it when it's paid. */
+function toPayList(trip, days) {
+  const rows = orderedItems(trip, days).filter((i) => expectedCost(i) > 0 || isPaid(i));
+  if (!rows.length) return null;
+  const left = rows.filter((i) => !isPaid(i)).length;
+  const dayLabel = (d) => {
+    if (!d) return "Unscheduled";
+    const i = days.indexOf(d);
+    return i >= 0 ? `Day ${i + 1}` : formatDay(d);
+  };
+  const toggle = (item, paid) => {
+    const fresh = loadTrips().find((t) => t.id === trip.id) ?? trip;
+    const next = { ...fresh, items: fresh.items.map((i) => (i.id === item.id ? setPaid(i, paid) : i)) };
+    saveTrip(next);
+    // Don't wipe a plan that's being edited: just refresh the summary.
+    if (ui.editingItem && activeSummary?.box.isConnected) activeSummary.update(next);
+    else render();
+  };
+  return h("section", { class: "summary-sec" },
+    h("div", { class: "summary-row" }, h("h3", null, "To pay"),
+      h("span", { class: "small muted" }, left ? `${left} of ${rows.length} left` : "All paid 🎉")),
+    h("ul", { class: "pay-list" }, rows.map((item) => {
+      const paid = isPaid(item);
+      const amount = expectedCost(item);
+      const box = h("input", { type: "checkbox", checked: paid, "aria-label": `${item.title}: paid` });
+      box.addEventListener("change", () => toggle(item, box.checked));
+      return h("li", { class: paid ? "paid-row" : "" },
+        h("label", null,
+          box,
+          h("span", { class: "pay-main" },
+            h("span", { class: "pay-title" }, item.title),
+            h("span", { class: "small muted" }, h("i", { class: `dot cat-${item.category}` }), dayLabel(item.date))),
+          h("span", { class: "pay-amt" },
+            h("span", { class: "num" }, formatMoney(amount, trip.currency)),
+            alt(amount, trip.currency))));
+    })));
 }
 
 const shortDate = (ms) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -738,9 +780,11 @@ function itemButton(item, trip, selected) {
         item.notes && h("em", null, item.notes),
         item.link && h("span", null, "🔗"))),
     h("span", { class: "item-cost num" },
-      item.actualCost !== null && item.actualCost !== undefined
-        ? [formatMoney(item.actualCost, trip.currency), alt(item.actualCost, trip.currency), h("small", { class: "paid" }, "Paid")]
-        : item.estimatedCost > 0 ? [formatMoney(item.estimatedCost, trip.currency), alt(item.estimatedCost, trip.currency), h("small", { class: "muted" }, "Estimate")] : ""));
+      expectedCost(item) > 0 || isPaid(item)
+        ? [formatMoney(expectedCost(item), trip.currency), alt(expectedCost(item), trip.currency),
+           isPaid(item) ? h("small", { class: "paid" }, "✓ Paid")
+             : h("small", { class: "muted" }, item.actualCost !== null && item.actualCost !== undefined ? "To pay" : "Estimate")]
+        : ""));
 }
 
 /* ----- saved places: a scratchpad of places, each one a click away from the itinerary ----- */
@@ -1336,6 +1380,13 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   });
 
   const useSelect = days.length > 0 && (item.date === "" || days.includes(item.date));
+  const actualInput = h("input", { name: "actualCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "Same as estimate", value: item.actualCost ?? "" });
+  const paidBox = h("input", { type: "checkbox", name: "paid", checked: isPaid(item) });
+  // Typing what you actually paid into an empty box ticks "Paid", unless you've set the box yourself.
+  let paidTouched = false;
+  paidBox.addEventListener("change", () => { paidTouched = true; });
+  const hadActual = item.actualCost !== null && item.actualCost !== undefined;
+  actualInput.addEventListener("input", () => { if (!paidTouched && !hadActual) paidBox.checked = actualInput.value.trim() !== ""; });
   const form = h("form", { class: "card pad form-grid six editing" },
     field("What", placeBox.el, "span-4"),
     field("Category", categorySelect, "span-2"),
@@ -1347,9 +1398,10 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
     field("Where", locationInput, "span-3"),
     costField(`Estimated cost (${trip.currency})`, h("input", { name: "estimatedCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: item.estimatedCost || "" }), trip.currency),
-    costField(`Actual cost (${trip.currency})`, h("input", { name: "actualCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "Not paid yet", value: item.actualCost ?? "" }), trip.currency),
+    costField(`Actual cost (${trip.currency})`, actualInput, trip.currency),
     field("Link", linkInput, "span-2"),
     field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"),
+    h("label", { class: "check span-all" }, paidBox, h("span", null, "Paid"), h("span", { class: "small muted" }, " · ticks it off the to-pay list on the right")),
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, "Save"),
       h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
@@ -1365,6 +1417,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       date: String(f.get("date") ?? ""),
       estimatedCost: Number(f.get("estimatedCost")) || 0,
       actualCost: actualRaw === "" || Number.isNaN(Number(actualRaw)) ? null : Number(actualRaw),
+      paid: paidBox.checked,
     };
     const current = loadTrips().find((t) => t.id === trip.id) ?? trip;
     const exists = current.items.some((i) => i.id === item.id);
@@ -1387,6 +1440,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       location: String(f.get("location")).trim(),
       estimatedCost: Number(f.get("estimatedCost")) || 0,
       actualCost: actual === null || Number.isNaN(actual) ? null : actual,
+      paid: paidBox.checked,
       link: String(f.get("link")).trim(),
       notes: String(f.get("notes")),
     });
