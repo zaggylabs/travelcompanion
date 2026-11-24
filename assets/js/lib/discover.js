@@ -1,5 +1,5 @@
 // Discover: find places near an area ("food near Shibuya") from OpenStreetMap, via the
-// free Overpass API. There are no ratings or reviews in OpenStreetMap, so results are
+// free Overpass API, falling back to Photon (fewer details, but fast) when Overpass is busy. There are no ratings or reviews in OpenStreetMap, so results are
 // sorted by distance (or by how much is listed about them) and never by made-up scores.
 // Fair use: one request per search (never per keystroke), a capped radius and result
 // count, and results cached in the browser for a week.
@@ -19,21 +19,21 @@ const CACHE_MAX = 10; // a busy area is ~60 KB, so this stays well clear of the 
  * `keyword` says what a "ramen" style keyword matches besides the name.
  */
 export const DISCOVER_TYPES = [
-  { key: "food", label: "Food", icon: "🍜", group: "Food", category: "Food", cuisine: true,
+  { key: "food", photon: "amenity:restaurant amenity:fast_food amenity:food_court", label: "Food", icon: "🍜", group: "Food", category: "Food", cuisine: true,
     filters: ['["amenity"~"^(restaurant|fast_food|food_court)$"]'], placeholder: "ramen, sushi, halal…" },
-  { key: "cafes", label: "Cafés and desserts", icon: "☕", group: "Food", category: "Food", cuisine: true,
+  { key: "cafes", photon: "amenity:cafe amenity:ice_cream shop:bakery shop:pastry shop:confectionery", label: "Cafés and desserts", icon: "☕", group: "Food", category: "Food", cuisine: true,
     filters: ['["amenity"~"^(cafe|ice_cream)$"]', '["shop"~"^(bakery|pastry|confectionery)$"]'], placeholder: "matcha, bakery…" },
-  { key: "bars", label: "Bars", icon: "🍸", group: "Food", category: "Food", cuisine: false,
+  { key: "bars", photon: "amenity:bar amenity:pub amenity:biergarten", label: "Bars", icon: "🍸", group: "Food", category: "Food", cuisine: false,
     filters: ['["amenity"~"^(bar|pub|biergarten)$"]'], placeholder: "rooftop, izakaya…" },
-  { key: "sights", label: "Sights", icon: "🏯", group: "Sights", category: "Activities", cuisine: false,
+  { key: "sights", photon: "tourism:attraction tourism:museum tourism:gallery tourism:viewpoint tourism:zoo tourism:aquarium tourism:theme_park historic:castle historic:monument historic:ruins historic:archaeological_site", label: "Sights", icon: "🏯", group: "Sights", category: "Activities", cuisine: false,
     filters: [
       '["tourism"~"^(attraction|museum|gallery|viewpoint|zoo|aquarium|theme_park)$"]',
       '["historic"~"^(castle|monument|ruins|archaeological_site|city_gate|fort)$"]',
       '["amenity"="place_of_worship"]["wikidata"]', // only the notable ones, or every small shrine shows up
     ], placeholder: "museum, temple…" },
-  { key: "parks", label: "Parks and nature", icon: "🌳", group: "Sights", category: "Activities", cuisine: false,
+  { key: "parks", photon: "leisure:park leisure:garden leisure:nature_reserve natural:beach natural:peak natural:waterfall", label: "Parks and nature", icon: "🌳", group: "Sights", category: "Activities", cuisine: false,
     filters: ['["leisure"~"^(park|garden|nature_reserve)$"]', '["natural"~"^(beach|peak|waterfall)$"]'], placeholder: "garden, beach…" },
-  { key: "shopping", label: "Shopping", icon: "🛍️", group: "Shopping", category: "Shopping", cuisine: false,
+  { key: "shopping", photon: "shop:mall shop:department_store shop:gift shop:souvenir shop:books shop:anime shop:games shop:toys shop:electronics amenity:marketplace", label: "Shopping", icon: "🛍️", group: "Shopping", category: "Shopping", cuisine: false,
     filters: ['["shop"~"^(mall|department_store|gift|souvenir|books|anime|games|toys|electronics|second_hand|variety_store)$"]', '["amenity"="marketplace"]'],
     placeholder: "market, books…" },
 ];
@@ -53,15 +53,10 @@ export function buildQuery({ type, lat, lon, radius, keyword }) {
   const k = cleanKeyword(keyword);
   // OSM cuisine values use underscores ("japanese;ramen", "bubble_tea"), so a space matches either.
   const rx = k.replace(/ /g, "[ _]");
-  const lines = [];
-  for (const f of t.filters) {
-    if (!k) lines.push(`  nwr${at}${f}["name"];`);
-    else {
-      lines.push(`  nwr${at}${f}["name"~"${rx}",i];`);
-      if (t.cuisine) lines.push(`  nwr${at}${f}["name"]["cuisine"~"${rx}",i];`);
-    }
-  }
-  return `[out:json][timeout:25];\n(\n${lines.join("\n")}\n);\nout tags center ${MAX_RESULTS};`;
+  const all = `(\n${t.filters.map((f) => `  nwr${at}${f}["name"];`).join("\n")}\n)`;
+  // With a keyword, find everything of the type first, then match the name (or cuisine) within that.
+  const pick = !k ? `${all};` : `${all}->.c;\n(nwr.c["name"~"${rx}",i];${t.cuisine ? ` nwr.c["cuisine"~"${rx}",i];` : ""});`;
+  return `[out:json][timeout:25];\n${pick}\nout tags center ${MAX_RESULTS};`;
 }
 
 /** Metres between two points. */
@@ -143,6 +138,41 @@ export function parseResults(elements, center) {
   return out.sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
 }
 
+/** Photon GeoJSON -> the same result shape (no cuisine, hours or website; the info panel looks those up). */
+export function parsePhoton(features, center, radius) {
+  const out = [];
+  const seen = new Set();
+  for (const f of features ?? []) {
+    const p = f.properties ?? {};
+    const [lon, lat] = f.geometry?.coordinates ?? [];
+    if (!p.name || !Number.isFinite(lat) || !p.osm_type) continue;
+    const distance = center ? distanceM(center, { lat, lon }) : null;
+    if (radius && distance > radius * 1.05) continue;
+    const key = `${p.name.toLowerCase()}|${lat.toFixed(3)}|${lon.toFixed(3)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const kind = resultKind({ [p.osm_key]: p.osm_value });
+    out.push({ osm: `${p.osm_type}${p.osm_id}`, name: p.name, localName: "", kind: kind.label, kindTag: kind.tag, cuisine: "", hours: "", website: "", lat, lon, distance, score: 0 });
+  }
+  return out.sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
+}
+
+export function photonUrl({ type, lat, lon, radius, keyword }) {
+  const t = discoverType(type);
+  const k = cleanKeyword(keyword);
+  const params = new URLSearchParams({ lat: String(lat), lon: String(lon), limit: "50", lang: "en" });
+  for (const tag of t.photon.split(" ")) params.append("osm_tag", tag);
+  if (!k) {
+    params.set("radius", String(Math.min(Number(radius) || 1000, 2000) / 1000));
+    return `https://photon.komoot.io/reverse?${params}`;
+  }
+  const dLat = (Number(radius) || 1000) / 111320;
+  const dLon = dLat / Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+  params.set("q", k);
+  params.set("bbox", [lon - dLon, lat - dLat, lon + dLon, lat + dLat].map((n) => n.toFixed(5)).join(","));
+  return `https://photon.komoot.io/api/?${params}`;
+}
+
 export function sortResults(results, sort) {
   const list = [...(results ?? [])];
   if (sort === "info") return list.sort((a, b) => b.score - a.score || (a.distance ?? 0) - (b.distance ?? 0));
@@ -161,8 +191,8 @@ export function cacheKey({ type, lat, lon, radius, keyword }) {
 }
 
 /**
- * Places of a type around a point. Resolves to { results, cached }.
- * Throws when every Overpass server failed or timed out.
+ * Places of a type around a point. Resolves to { results, cached, basic }; `basic` means Overpass
+ * was busy and these came from Photon, without cuisine or hours. Throws when everything failed.
  */
 export async function discoverPlaces(params, signal) {
   const key = cacheKey(params);
@@ -174,22 +204,30 @@ export async function discoverPlaces(params, signal) {
   let lastError = null;
   for (const url of OVERPASS_ENDPOINTS) {
     try {
-      const timeout = AbortSignal.timeout(30000);
+      const timeout = AbortSignal.timeout(15000);
       const res = await fetch(url, { method: "POST", body, signal: signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal ?? timeout });
-      if (res.status === 429 || res.status >= 500) { lastError = new Error(`busy (${res.status})`); continue; }
-      if (!res.ok) throw new Error(`Search failed (${res.status})`);
-      const data = await res.json();
+      if (!res.ok) { lastError = new Error(`Overpass ${res.status}`); continue; }
+      const data = await res.json(); // a busy server can answer with an HTML page, which lands in the catch
       const results = parseResults(data.elements, { lat: params.lat, lon: params.lon });
       const fresh = readCache();
       fresh[key] = { at: Date.now(), results };
       const keys = Object.keys(fresh).sort((a, b) => fresh[a].at - fresh[b].at);
       while (keys.length > CACHE_MAX) delete fresh[keys.shift()];
       writeCache(fresh);
-      return { results, cached: false };
+      return { results, cached: false, basic: false };
     } catch (e) {
       if (signal?.aborted) throw e;
       lastError = e;
     }
   }
-  throw lastError ?? new Error("Search failed");
+  // Both Overpass servers are busy: Photon is quick and almost always up. Not cached, so the next search tries Overpass again.
+  try {
+    const res = await fetch(photonUrl(params), { signal: signal ?? AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`Search failed (${res.status})`);
+    const data = await res.json();
+    return { results: parsePhoton(data.features, { lat: params.lat, lon: params.lon }, params.radius), cached: false, basic: true };
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw lastError ?? e;
+  }
 }

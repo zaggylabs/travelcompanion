@@ -1,7 +1,7 @@
 // Discover tab. Run with: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildQuery, cacheKey, cleanKeyword, distanceM, formatDistance, infoScore, parseResults, prettyCuisine, sortResults } from "../assets/js/lib/discover.js";
+import { buildQuery, cacheKey, cleanKeyword, distanceM, formatDistance, infoScore, parsePhoton, parseResults, photonUrl, prettyCuisine, sortResults } from "../assets/js/lib/discover.js";
 
 test("keywords can't break out of the Overpass query", () => {
   assert.equal(cleanKeyword('ramen"];out;'), "ramen out");
@@ -17,8 +17,9 @@ test("the query asks for named places of the type around the spot", () => {
   assert.match(q, /out tags center 300;/);
   const k = buildQuery({ type: "food", lat: 1, lon: 2, radius: 99999, keyword: "bubble tea" });
   assert.match(k, /around:2000,/, "radius is capped");
-  assert.match(k, /\["name"~"bubble\[ _\]tea",i\]/);
-  assert.match(k, /\["cuisine"~"bubble\[ _\]tea",i\]/);
+  assert.match(k, /->\.c;/);
+  assert.match(k, /nwr\.c\["name"~"bubble\[ _\]tea",i\]/);
+  assert.match(k, /nwr\.c\["cuisine"~"bubble\[ _\]tea",i\]/);
   const s = buildQuery({ type: "sights", lat: 1, lon: 2, radius: 500, keyword: "castle" });
   assert.doesNotMatch(s, /cuisine/);
   assert.match(s, /place_of_worship"\]\["wikidata"\]/);
@@ -55,4 +56,20 @@ test("small helpers", () => {
   assert.equal(prettyCuisine("bubble_tea"), "Bubble tea");
   assert.equal(prettyCuisine(""), "");
   assert.equal(cacheKey({ type: "food", lat: 1.234567, lon: 2, radius: 500, keyword: " Ramen " }), "food|1.2346|2.0000|500|ramen");
+});
+
+test("when Overpass is busy, Photon gives a basic list in the same shape", () => {
+  const plain = new URL(photonUrl({ type: "food", lat: 35.66, lon: 139.7, radius: 1000, keyword: "" }));
+  assert.equal(plain.pathname, "/reverse");
+  assert.equal(plain.searchParams.get("radius"), "1");
+  assert.deepEqual(plain.searchParams.getAll("osm_tag"), ["amenity:restaurant", "amenity:fast_food", "amenity:food_court"]);
+  const kw = new URL(photonUrl({ type: "food", lat: 35.66, lon: 139.7, radius: 1000, keyword: "ramen" }));
+  assert.equal(kw.pathname, "/api/");
+  assert.equal(kw.searchParams.get("q"), "ramen");
+  assert.equal(kw.searchParams.get("bbox").split(",").length, 4);
+  const res = parsePhoton([
+    { geometry: { coordinates: [139.7, 35.661] }, properties: { name: "Ramen Nagi", osm_type: "N", osm_id: 5, osm_key: "amenity", osm_value: "fast_food" } },
+    { geometry: { coordinates: [139.7, 35.70] }, properties: { name: "Too far", osm_type: "N", osm_id: 6, osm_key: "amenity", osm_value: "restaurant" } },
+  ], { lat: 35.66, lon: 139.7 }, 1000);
+  assert.deepEqual(res.map((r) => [r.osm, r.name, r.kind]), [["N5", "Ramen Nagi", "Fast food"]]);
 });

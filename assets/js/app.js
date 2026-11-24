@@ -1011,10 +1011,10 @@ async function runDiscover(trip) {
       }
       d.area = areaFrom(found, d.areaText);
     }
-    const { results, cached } = await discoverPlaces(
+    const { results, cached, basic } = await discoverPlaces(
       { type: d.type, lat: d.area.lat, lon: d.area.lon, radius: d.radius, keyword: d.keyword }, controller.signal);
     if (controller !== discoverController) return;
-    Object.assign(d, { status: "done", results, cached, resultType: d.type });
+    Object.assign(d, { status: "done", results, cached, basic, resultType: d.type });
   } catch (e) {
     if (controller.signal.aborted) return;
     Object.assign(d, { status: "error", error: e.userText ?? "Couldn't reach the free OpenStreetMap search just now. It may be busy, so try again in a minute." });
@@ -1112,6 +1112,9 @@ function discoverResults(trip, days, d) {
     h("div", { class: "disc-head" },
       h("p", { class: "small muted" }, `${plural(list.length, "place")} within ${formatDistance(d.radius)} of `, h("strong", null, d.area.label)),
       sortSelect),
+    d.basic && h("p", { class: "hint small" }, "The detailed OpenStreetMap search is busy right now, so this is a simpler list without cuisines or opening hours",
+      d.keyword ? `, matching "${d.keyword}" by name only` : "", ". Pick a place to see its details, or ",
+      h("button", { class: "linkish", type: "button", onclick: () => runDiscover(trip) }, "search again"), " in a minute."),
     h("ul", { class: "items" }, list.slice(0, d.shown).map((r) => h("li", null,
       discoverRow(r, trip, days, d, type, selected?.osm === r.osm),
       d.scheduling === r.osm && schedulePanel(r.name, days, (date, time) => {
