@@ -2231,7 +2231,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   function drawFiles() {
     const saved = item.attachments ?? [];
     const row = (name, size, note, button) => h("li", { class: "file" }, h("span", { class: "file-main" }, h("span", { class: "file-name" }, name), h("span", { class: "small muted" }, [formatSize(size), note].filter(Boolean).join(" · "))), button);
-    filesBox.replaceChildren(
+    filesBox.replaceChildren(...[
       h("span", null, "Attachments"),
       (saved.length || pending.length) ? h("ul", { class: "files" },
         saved.map((f) => removing.has(f.id)
@@ -2242,7 +2242,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       h("div", { class: "actions" },
         h("button", { class: "btn", type: "button", onclick: () => fileInput.click() }, clipIcon(), "Attach file"),
         h("span", { class: "small muted" }, "Tickets, bookings or screenshots (images or PDFs). Saved in this browser only."),
-        fileInput));
+        fileInput)].filter(Boolean)); // replaceChildren would print a null as "null"
   }
   drawFiles();
   filesBox.addEventListener("dragover", (e) => { e.preventDefault(); filesBox.classList.add("drop"); });
