@@ -346,13 +346,14 @@ function field(label, control, cls) {
 function foldable(parts) {
   const chips = h("div", { class: "add-chips span-all" });
   const draw = () => {
-    chips.replaceChildren(...parts.filter((p) => p.el.hidden).map((p) => h("button", { class: "chip small plain", type: "button",
-      onclick: () => { p.el.hidden = false; draw(); p.el.querySelector("input:not([type=file]), textarea, button")?.focus(); } }, `+ ${p.label}`)));
+    chips.replaceChildren(...parts.filter((p) => p.els[0].hidden).map((p) => h("button", { class: "chip small plain", type: "button",
+      onclick: () => { for (const el of p.els) el.hidden = false; draw(); p.els[0].querySelector("input:not([type=file]), textarea, select, button")?.focus(); } }, `+ ${p.label}`)));
     chips.hidden = !chips.childElementCount;
   };
-  for (const p of parts) p.el.hidden = !p.open;
+  // A part is one element (el) or several shown together (els).
+  for (const p of parts) { p.els = (p.els ?? [p.el]).filter(Boolean); for (const el of p.els) el.hidden = !p.open; }
   draw();
-  return [...parts.map((p) => p.el), chips];
+  return [...parts.flatMap((p) => p.els), chips];
 }
 
 const settlementRow = (p) => [
@@ -2470,6 +2471,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     categoryTouched = true;
     // Flights and Transport switch to the travel layout (and back).
     if (TRAVEL_CATEGORIES.includes(categorySelect.value) || isTravel) switchKind(categorySelect.value);
+    else if (categorySelect.value === "Lodging") [...form.querySelectorAll(".add-chips button")].find((b) => b.textContent === "+ Cost")?.click();
   });
   let autoLocation = null; // what we filled in, so a later pick can replace it
   let autoLink = null;
@@ -2613,13 +2615,14 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     !isTravel && field("Place", placeBox.el, "span-3"),
     !isTravel && field("Where", locationInput, "span-3"),
     isTravel ? travelFields : [dayField("span-2"), field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1")],
-    costInput.el,
-    field("Currency", currencySelect, "span-1"),
     foldable([
+      // Flights and stays nearly always cost something; other plans often don't.
+      { label: "Cost", open: expectedCost(item) > 0 || ["Flights", "Lodging"].includes(item.category),
+        els: [costInput.el, field("Currency", currencySelect, "span-1"),
+          h("label", { class: "check span-all" }, paidBox, h("span", null, "Paid"), h("span", { class: "small muted" }, " · ticks it off the to-pay list on the right"))] },
       { label: "Link", el: field("Link", linkInput, "span-all"), open: Boolean(item.link) },
       { label: "Notes", el: field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"), open: Boolean(item.notes?.trim()) },
       { label: "Attachment", el: filesBox, open: Boolean(item.attachments?.length || pending.length) }]),
-    h("label", { class: "check span-all" }, paidBox, h("span", null, "Paid"), h("span", { class: "small muted" }, " · ticks it off the to-pay list on the right")),
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, "Save"),
       h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
