@@ -553,3 +553,12 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 .idea-thumb { width: 56px; height: 56px; flex-shrink: 0; border-radius: 8px; object-fit: cover; background: var(--muted-bg); }
 .idea-rating { display: block; margin-top: 2px; font-weight: 600; }
 .link-hint .linkish { font-size: inherit; }
+/* Saved places: "Paste a booking link" or "Fill in manually" */
+.idea-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mode-btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--subtle); font: inherit; font-weight: 600; cursor: pointer; }
+.mode-btn:hover { color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.mode-btn[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--fg); box-shadow: 0 0 0 1px var(--accent); }
+.mode-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+form[data-mode="manual"] .link-field, form[data-mode="manual"] .details-label { display: none; }
+.details-label { margin: 4px 0 -6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.72rem; }
+@container (max-width: 420px) { .idea-modes { grid-template-columns: 1fr; } }

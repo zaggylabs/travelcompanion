@@ -1292,7 +1292,7 @@ function ideasView(trip, days) {
     h("div", { class: "card pad stack ideas-add" },
       h("div", null,
         h("h2", null, "Saved places"),
-        h("p", { class: "small muted" }, "Jot down places you might go: somewhere to eat, a sight, an activity. You can also paste a Booking.com, Agoda, Klook or Airbnb link. When you know when, press ",
+        h("p", { class: "small muted" }, "Jot down places you might go: somewhere to eat, a sight, an activity, where you're staying. When you know when, press ",
           h("strong", null, "Add to itinerary"), " and pick the day and time.")),
       adding && ideaForm(emptyIdea(ui.lastIdeaGroup || "Food"), trip, days, addNew, null, null, focus)),
     groups.length === 0
@@ -1528,20 +1528,41 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
     if (!parseBookingLink(titleInput.value)) return;
     linkInput.value = titleInput.value.trim();
     titleInput.value = "";
+    setMode("link");
     placeBox.close();
     readLink();
     if (!titleInput.value) titleInput.focus();
   });
+  // New places: two clear ways in. Paste a booking link (details get filled in), or type it yourself.
+  const linkField = h("label", { class: "field span-all link-field" },
+    h("span", null, isNew ? "Booking link" : "Booking link (optional)"), linkInput, linkHint,
+    isNew && h("span", { class: "small muted" }, "Booking.com, Agoda, Klook, Airbnb, Trip.com and more. We fill in the name, area and type, and you can edit them below."));
+  const modeBtn = (m, icon, label) => h("button", { type: "button", role: "tab", class: `mode-btn mode-${m}`, onclick: () => setMode(m, true) }, h("span", { "aria-hidden": "true" }, icon), label);
+  const modes = isNew && h("div", { class: "idea-modes span-all", role: "tablist", "aria-label": "How to add a place" },
+    modeBtn("link", "🔗", "Paste a booking link"), modeBtn("manual", "✏️", "Fill in manually"));
   const form = h("form", { class: `form-grid six${isNew ? "" : " card pad editing"}` },
+    modes,
+    linkField,
+    isNew && h("p", { class: "span-all small muted details-label" }, "Details"),
     field("Place", placeBox.el, "span-4"),
     field("Type", groupSelect, "span-2"),
     field("Where", locationInput, "span-3"),
     field("Note", h("input", { name: "notes", placeholder: "Optional, e.g. try the tonkotsu", value: idea.notes }), "span-3"),
-    h("label", { class: "field span-all" }, h("span", null, "Booking link (optional)"), linkInput, linkHint),
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, isNew ? "Save place" : "Save"),
       onCancel && h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
       onDelete && h("button", { class: "btn danger push", type: "button", onclick: onDelete }, "Delete")));
+  function setMode(m, user) {
+    if (!isNew) return;
+    ui.ideaMode = m;
+    form.dataset.mode = m;
+    for (const b of modes.querySelectorAll(".mode-btn")) b.setAttribute("aria-selected", String(b.classList.contains(`mode-${m}`)));
+    if (user) (m === "link" ? linkInput : titleInput).focus();
+  }
+  if (isNew) {
+    setMode(ui.ideaMode || "link");
+    if (form.dataset.mode === "link" && focus) { titleInput.removeAttribute("autofocus"); linkInput.setAttribute("autofocus", ""); }
+  }
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const f = new FormData(form);
