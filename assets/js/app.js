@@ -5,6 +5,7 @@ import { crowdTip, dayNote, getHolidays, getPlaceInfo } from "./lib/placeinfo.js
 import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
+import { browserGuess, convert, getRates, savedHome, saveHome } from "./lib/rates.js";
 import { expectedCost, summarizeBudget } from "./lib/budget.js";
 import { csvToItems, itemsToCsv } from "./lib/csv.js";
 import { deleteTrip, loadTrips, saveTrip, STORAGE_KEY } from "./lib/store.js";
@@ -48,7 +49,66 @@ const ui = {
   attachError: null,
   confirmRemoveFile: null, // attachment id awaiting "Remove?" confirmation
   selectedItem: null, // plan whose place info shows in the info panel
+  homeOpen: false, // home currency settings card
 };
+
+/* ---------- home currency ---------- */
+
+// Until the user picks, assume the browser's country; the first-run card asks them to confirm.
+let home = savedHome() ?? browserGuess();
+let rates = null; // { base: home.currency, rates, updated, source, stale? }
+let ratesStatus = "loading"; // loading | ok | stale | failed
+
+function loadRates() {
+  const base = home.currency;
+  ratesStatus = "loading";
+  getRates(base).then((table) => {
+    if (base !== home.currency) return; // home changed meanwhile
+    rates = table;
+    ratesStatus = !table ? "failed" : table.stale ? "stale" : "ok";
+    refreshAfterRates();
+  });
+}
+
+// Don't rebuild the page under someone who's typing; the summary can still update in place.
+function refreshAfterRates() {
+  const typing = root.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+  if (!typing && !ui.editingItem && !ui.editingTrip) return render();
+  const trip = loadTrips().find((t) => t.id === currentTripId());
+  if (trip && activeSummary?.box.isConnected) activeSummary.update(trip);
+}
+
+/** Amount in the home currency, or null when it's the same currency or there's no rate. */
+function toHome(amount, currency) {
+  if (!currency || currency === home.currency) return null;
+  return convert(amount, currency, home.currency, rates);
+}
+const homeText = (amount, currency) => {
+  const v = toHome(amount, currency);
+  return v === null ? "" : `≈ ${formatMoney(v, home.currency)}`;
+};
+/** A small "≈ S$12.30" line under a trip-currency amount. */
+const alt = (amount, currency, cls = "") => {
+  const t = amount > 0 ? homeText(amount, currency) : "";
+  return t ? h("span", { class: `alt num ${cls}` }, t) : null;
+};
+
+function setHome(next) {
+  const changed = next.currency !== home.currency;
+  home = next;
+  saveHome(next);
+  if (changed) { rates = null; loadRates(); }
+  updateHomeButton();
+}
+
+const homeBtn = document.getElementById("home-btn");
+function updateHomeButton() {
+  if (!homeBtn) return;
+  homeBtn.hidden = false;
+  homeBtn.textContent = `Home: ${home.currency}`;
+  homeBtn.title = "Change your home currency";
+}
+homeBtn?.addEventListener("click", () => { ui.homeOpen = true; render(); window.scrollTo({ top: 0 }); });
 
 // Wide screens get three columns (place info | itinerary | budget); narrower ones show the info under the selected plan.
 const WIDE = window.matchMedia("(min-width: 960px)");
@@ -98,19 +158,65 @@ function render() {
   const id = currentTripId();
   const trip = trips.find((t) => t.id === id);
   document.body.classList.toggle("trip-page", Boolean(trip));
-  root.replaceChildren(trip ? tripView(trip) : tripList(trips));
+  const firstRun = !savedHome();
+  const showHome = ui.homeOpen || (firstRun && !trip);
+  root.replaceChildren(...[showHome && homeCard(firstRun), trip ? tripView(trip) : tripList(trips, showHome)].filter(Boolean));
   root.querySelector("[autofocus]")?.focus();
 }
 
 window.addEventListener("hashchange", render);
 window.addEventListener("storage", (e) => {
   if (e.key === STORAGE_KEY) render();
+  if (e.key?.startsWith("travelcompanion:home")) { const saved = savedHome(); if (saved) { setHome(saved); render(); } }
 });
+
+/* ----- home currency card ----- */
+
+function homeCard(firstRun) {
+  let country = getCountry(home.country);
+  const currencies = ALL_CURRENCIES.includes(home.currency) ? ALL_CURRENCIES : [home.currency, ...ALL_CURRENCIES];
+  const currencySelect = h("select", { name: "homeCurrency" }, currencies.map((c) => h("option", { selected: c === home.currency }, c)));
+  const countryInput = h("input", { name: "homeCountry", placeholder: "Start typing, e.g. Singapore", value: country?.name ?? "", autofocus: !firstRun });
+  const countryFlag = h("span", { class: "country-flag", "aria-hidden": "true" }, countryIcon(country?.code));
+  const setCountry = (c, picked) => {
+    country = c;
+    countryFlag.textContent = countryIcon(c?.code);
+    if (!c) return;
+    if (picked) countryInput.value = c.name;
+    if (![...currencySelect.options].some((o) => o.value === c.currency)) currencySelect.prepend(h("option", null, c.currency));
+    currencySelect.value = c.currency;
+  };
+  const countryBox = autocomplete(countryInput, {
+    search: (q) => searchCountries(q),
+    renderItem: (c) => [FLAGS_OK && h("span", { class: "ac-icon", "aria-hidden": "true" }, flag(c.code)), h("span", { class: "ac-main" }, h("span", { class: "ac-title" }, c.name)), h("span", { class: "ac-tag num" }, c.currency)].filter(Boolean),
+    onPick: (c) => setCountry(c, true),
+    emptyText: () => "No country matches that.",
+  });
+  countryInput.addEventListener("input", () => setCountry(findCountry(countryInput.value), false));
+
+  const form = h("form", { class: "form-grid two" },
+    field("I'm from", h("div", { class: "with-flag" }, countryFlag, countryBox.el)),
+    field("Home currency", currencySelect),
+    h("div", { class: "actions span-all" },
+      h("button", { class: "btn primary", type: "submit" }, firstRun ? "Continue" : "Save"),
+      !firstRun && h("button", { class: "btn", type: "button", onclick: () => { ui.homeOpen = false; render(); } }, "Cancel")));
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const c = country ?? findCountry(countryInput.value);
+    setHome({ country: c?.code ?? "", currency: currencySelect.value });
+    ui.homeOpen = false;
+    render();
+  });
+  return h("section", { class: "card pad home-card" },
+    h("h2", null, firstRun ? "Welcome! Where are you from?" : "Your home currency"),
+    h("p", { class: "muted" }, "Enter trip costs in the local currency and we'll also show what they come to in your home currency, at today's exchange rate. You can change this any time with the Home button at the top."),
+    form);
+}
 
 /* ----- trip list ----- */
 
-function tripList(trips) {
-  const creating = ui.creatingTrip ?? trips.length === 0;
+function tripList(trips, homeShowing) {
+  const creating = !homeShowing && (ui.creatingTrip ?? trips.length === 0);
   const sorted = [...trips].sort((a, b) => (a.startDate || "9999").localeCompare(b.startDate || "9999"));
   return h("div", { class: "stack" },
     h("div", { class: "page-head" },
@@ -137,7 +243,8 @@ function tripList(trips) {
               : "Dates not set"),
             h("span", { class: "small muted" },
               `${plural(t.items.length, "plan")} · ${formatMoney(s.totalProjected, t.currency)}`,
-              s.totalBudget > 0 ? ` of ${formatMoney(s.totalBudget, t.currency)}` : "")));
+              s.totalBudget > 0 ? ` of ${formatMoney(s.totalBudget, t.currency)}` : "",
+              s.totalProjected > 0 && homeText(s.totalProjected, t.currency) ? ` (${homeText(s.totalProjected, t.currency)})` : "")));
         }))
       : !creating && h("p", { class: "card pad center muted" }, "No trips yet. Create one to get started."));
 }
@@ -328,14 +435,16 @@ function summaryContent(trip, days, draft) {
     h("div", null,
       h("p", { class: "small muted" }, "Expected total"),
       h("p", { class: "summary-total num" }, money(s.totalProjected)),
+      alt(s.totalProjected, trip.currency, "summary-alt"),
       h("p", { class: "small muted" }, `${money(s.projectedPerPerson)} per person`, s.projectedPerDay !== null ? ` · ${money(s.projectedPerDay)} per day` : "")),
     h("div", { class: "summary-split" },
-      h("div", null, h("span", { class: "small muted" }, "Paid so far"), h("strong", { class: "num good" }, money(s.totalSpent))),
-      h("div", null, h("span", { class: "small muted" }, "Still to pay"), h("strong", { class: "num" }, money(toPay)))),
+      h("div", null, h("span", { class: "small muted" }, "Paid so far"), h("strong", { class: "num good" }, money(s.totalSpent)), alt(s.totalSpent, trip.currency)),
+      h("div", null, h("span", { class: "small muted" }, "Still to pay"), h("strong", { class: "num" }, money(toPay)), alt(toPay, trip.currency))),
     s.totalProjected > 0 && h("div", { class: "bar", title: `${Math.round((s.totalSpent / s.totalProjected) * 100)}% paid` }, h("div", { style: `width:${pct(s.totalSpent, s.totalProjected)}` })),
     // Compare with the total budget only when every category with costs has a limit; otherwise call out each category that's over.
     hasBudget && cats.every((c) => c.budget !== null) && h("p", { class: `small ${over ? "bad strong" : "muted"}` },
-      over ? `${money(Math.abs(s.remaining))} over your ${money(s.totalBudget)} budget` : `${money(s.remaining)} left of your ${money(s.totalBudget)} budget`),
+      over ? `${money(Math.abs(s.remaining))} over your ${money(s.totalBudget)} budget` : `${money(s.remaining)} left of your ${money(s.totalBudget)} budget`,
+      homeText(Math.abs(s.remaining), trip.currency) && ` (${homeText(Math.abs(s.remaining), trip.currency)})`),
     hasBudget && !cats.every((c) => c.budget !== null) && cats.filter((c) => c.budget !== null && c.projected > c.budget).map((c) =>
       h("p", { class: "small bad strong" }, `${c.category} is ${money(c.projected - c.budget)} over its ${money(c.budget)} limit`)),
     h("section", { class: "summary-sec" },
@@ -343,7 +452,9 @@ function summaryContent(trip, days, draft) {
       h("ul", { class: "summary-list" }, cats.map((c) => h("li", null,
         h("span", { class: "summary-row" },
           h("span", null, h("i", { class: `dot cat-${c.category}` }), c.category),
-          h("span", { class: `num ${c.budget !== null && c.projected > c.budget ? "bad strong" : ""}` }, money(c.projected))),
+          h("span", { class: "summary-amt" },
+            h("span", { class: `num ${c.budget !== null && c.projected > c.budget ? "bad strong" : ""}` }, money(c.projected)),
+            alt(c.projected, trip.currency))),
         h("span", { class: "bar thin" }, h("span", { class: `cat-${c.category}`, style: `width:${pct(c.projected, s.totalProjected)}` })),
         c.spent > 0 && h("span", { class: "small muted" }, `${money(c.spent)} paid`))))),
     dayRows.some((r) => r.v > 0) && h("section", { class: "summary-sec" },
@@ -351,8 +462,30 @@ function summaryContent(trip, days, draft) {
       h("ul", { class: "summary-days" }, dayRows.map((r) => h("li", { class: r.v ? "" : "zero" },
         h("span", null, r.label, r.sub && h("span", { class: "muted" }, ` ${r.sub}`)),
         h("span", { class: "bar thin" }, h("span", { style: `width:${pct(r.v, maxDay)}` })),
-        h("span", { class: "num" }, r.v ? money(r.v) : "–"))))),
+        h("span", { class: "num", title: r.v ? homeText(r.v, trip.currency) || null : null }, r.v ? money(r.v) : "–"))))),
+    rateNote(trip),
     ui.tab !== "budget" && h("button", { class: "btn", type: "button", onclick: goBudget }, hasBudget ? "Budget limits" : "Set budget limits"))];
+}
+
+const shortDate = (ms) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+/** "¥1,000 = S$8.70 · rates from 23 Nov 2026", plus what to do when rates can't load. */
+function rateNote(trip) {
+  if (!trip.currency || trip.currency === home.currency) return null;
+  const link = (href, text) => h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text);
+  if (ratesStatus === "loading" && !rates) return h("p", { class: "small muted rate-note" }, `Loading ${home.currency} exchange rate…`);
+  if (!rates) {
+    return h("p", { class: "small muted rate-note" }, `Couldn't load exchange rates, so ${home.currency} amounts are hidden. `,
+      h("button", { class: "linkish", type: "button", onclick: () => { loadRates(); render(); } }, "Try again"));
+  }
+  let unit = 1;
+  while (unit < 1e6 && (toHome(unit, trip.currency) ?? 1) < 1) unit *= 10;
+  const v = toHome(unit, trip.currency);
+  if (v === null) return h("p", { class: "small muted rate-note" }, `No exchange rate available for ${trip.currency} to ${home.currency}.`);
+  return h("p", { class: "small muted rate-note" },
+    `${formatMoney(unit, trip.currency)} = ${formatMoney(v, home.currency)} · `,
+    rates.stale ? `offline, using rates from ${shortDate(rates.updated)}` : `rates from ${shortDate(rates.updated)}`, " · ",
+    rates.source === "er-api" ? link("https://www.exchangerate-api.com", "Rates by Exchange Rate API") : link("https://frankfurter.dev", "Frankfurter (ECB)"));
 }
 
 /** Itinerary order: trip days, then dates outside the trip, then unscheduled. */
@@ -423,7 +556,7 @@ function itineraryView(trip, days) {
       return h("section", { class: "day", "aria-label": g.label },
         h("div", { class: "day-head" },
           h("h3", null, g.label), g.sub && h("span", { class: "muted" }, g.sub),
-          total > 0 && h("span", { class: "muted num push" }, formatMoney(total, trip.currency))),
+          total > 0 && h("span", { class: "muted num push" }, formatMoney(total, trip.currency), homeText(total, trip.currency) && ` · ${homeText(total, trip.currency)}`)),
         h("ul", { class: "items" },
           g.items.map((item) => h("li", null, e?.mode === "edit" && e.id === item.id
             ? itemForm(item, trip, days, saveItem, cancel, () => {
@@ -497,8 +630,8 @@ function itemButton(item, trip, selected) {
         item.link && h("span", null, "🔗"))),
     h("span", { class: "item-cost num" },
       item.actualCost !== null && item.actualCost !== undefined
-        ? [formatMoney(item.actualCost, trip.currency), h("small", { class: "paid" }, "Paid")]
-        : item.estimatedCost > 0 ? [formatMoney(item.estimatedCost, trip.currency), h("small", { class: "muted" }, "Estimate")] : ""));
+        ? [formatMoney(item.actualCost, trip.currency), alt(item.actualCost, trip.currency), h("small", { class: "paid" }, "Paid")]
+        : item.estimatedCost > 0 ? [formatMoney(item.estimatedCost, trip.currency), alt(item.estimatedCost, trip.currency), h("small", { class: "muted" }, "Estimate")] : ""));
 }
 
 /* ----- attachments ----- */
@@ -615,6 +748,18 @@ function attachPanel(item, trip) {
   return panel;
 }
 
+// A cost input with a live "≈ S$12.30" under it while typing.
+function costField(label, input, currency) {
+  const hint = h("span", { class: "alt num cost-hint", "aria-live": "polite" });
+  const update = () => {
+    const n = Number(input.value);
+    hint.textContent = input.value.trim() !== "" && n > 0 ? homeText(n, currency) : "";
+  };
+  input.addEventListener("input", update);
+  update();
+  return h("label", { class: "field span-2" }, h("span", null, label), input, hint);
+}
+
 function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   const country = getCountry(trip.country);
   const titleInput = h("input", {
@@ -665,8 +810,8 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       : h("input", { name: "date", type: "date", value: item.date }), "span-2"),
     field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
     field("Where", locationInput, "span-3"),
-    field(`Estimated cost (${trip.currency})`, h("input", { name: "estimatedCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: item.estimatedCost || "" }), "span-2"),
-    field(`Actual cost (${trip.currency})`, h("input", { name: "actualCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "Not paid yet", value: item.actualCost ?? "" }), "span-2"),
+    costField(`Estimated cost (${trip.currency})`, h("input", { name: "estimatedCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: item.estimatedCost || "" }), trip.currency),
+    costField(`Actual cost (${trip.currency})`, h("input", { name: "actualCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "Not paid yet", value: item.actualCost ?? "" }), trip.currency),
     field("Link", linkInput, "span-2"),
     field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"),
     h("div", { class: "actions span-all" },
@@ -818,9 +963,10 @@ function budgetView(trip, days) {
   const refs = { cats: {} };
 
   const stat = (key, hint) => {
-    refs[key] = { label: h("span", { class: "small muted" }), value: h("strong", { class: "num" }) };
-    return h("div", { class: "card stat", title: hint }, refs[key].label, refs[key].value);
+    refs[key] = { label: h("span", { class: "small muted" }), value: h("strong", { class: "num" }), alt: h("span", { class: "alt num" }) };
+    return h("div", { class: "card stat", title: hint }, refs[key].label, refs[key].value, refs[key].alt);
   };
+  const setAlt = (el, n) => { el.textContent = n > 0 ? homeText(n, current.currency) : ""; };
 
   const rows = CATEGORIES.map((category) => {
     const input = h("input", { type: "number", min: 0, step: "1", inputmode: "decimal", placeholder: "No limit",
@@ -835,7 +981,9 @@ function budgetView(trip, days) {
       update();
       if (activeSummary?.box.isConnected) activeSummary.update(current);
     });
+    const limitAlt = h("span", { class: "alt num" });
     const r = {
+      limitAlt,
       planned: h("td", { class: "r num" }),
       spent: h("td", { class: "r num" }),
       projected: h("td", { class: "r num" }),
@@ -844,7 +992,7 @@ function budgetView(trip, days) {
     refs.cats[category] = r;
     return h("tr", null,
       h("td", null, h("i", { class: `dot cat-${category}` }), category),
-      h("td", { class: "limit" }, input),
+      h("td", { class: "limit" }, input, limitAlt),
       r.planned, r.spent, r.projected, r.bar);
   });
 
@@ -864,6 +1012,7 @@ function budgetView(trip, days) {
         h("tfoot", null, h("tr", null,
           h("td", null, "Total"), refs.foot.budget, refs.foot.planned, refs.foot.spent, refs.foot.projected, h("td", null))))),
     h("p", { class: "small muted" }, "Expected uses what you actually paid where you've entered it, and the estimate for everything else."),
+    rateNote(trip),
     days.length > 0 && h("section", null,
       h("h3", null, "By day"),
       (() => {
@@ -874,11 +1023,12 @@ function budgetView(trip, days) {
           return h("div", { class: "day-bar" },
             h("span", { class: "muted" }, `Day ${i + 1} · ${formatDay(d).split(", ")[1] ?? d}`),
             h("div", { class: "bar" }, h("div", { style: `width:${(v / maxDay) * 100}%` })),
-            h("span", { class: "num r" }, money(v)));
+            h("span", { class: "num r", title: homeText(v, current.currency) || null }, money(v)));
         }));
       })()));
 
-  function setStat(key, label, value, tone) {
+  function setStat(key, label, value, tone, amount = 0) {
+    setAlt(refs[key].alt, amount);
     refs[key].label.textContent = label;
     refs[key].value.textContent = value;
     refs[key].value.className = `num ${tone || ""}`;
@@ -888,18 +1038,20 @@ function budgetView(trip, days) {
     const s = summarizeBudget(current, days.length);
     const hasBudget = s.totalBudget > 0;
     const over = hasBudget && s.remaining < 0;
-    setStat("budget", "Budget", hasBudget ? money(s.totalBudget) : "Not set");
-    setStat("expected", "Expected total", money(s.totalProjected));
-    setStat("paid", "Paid so far", money(s.totalSpent));
-    setStat("left", over ? "Over budget" : "Left to spend", hasBudget ? money(Math.abs(s.remaining)) : "Not set", over ? "bad" : hasBudget ? "good" : "");
-    refs.perPerson.textContent = `${money(s.projectedPerPerson)} per person (${plural(current.travelers, "traveler")})` +
-      (s.projectedPerDay !== null ? ` · ${money(s.projectedPerDay)} per day` : "");
+    setStat("budget", "Budget", hasBudget ? money(s.totalBudget) : "Not set", "", s.totalBudget);
+    setStat("expected", "Expected total", money(s.totalProjected), "", s.totalProjected);
+    setStat("paid", "Paid so far", money(s.totalSpent), "", s.totalSpent);
+    setStat("left", over ? "Over budget" : "Left to spend", hasBudget ? money(Math.abs(s.remaining)) : "Not set", over ? "bad" : hasBudget ? "good" : "", hasBudget ? Math.abs(s.remaining) : 0);
+    const both = (n) => money(n) + (homeText(n, current.currency) ? ` (${homeText(n, current.currency)})` : "");
+    refs.perPerson.textContent = `${both(s.projectedPerPerson)} per person (${plural(current.travelers, "traveler")})` +
+      (s.projectedPerDay !== null ? ` · ${both(s.projectedPerDay)} per day` : "");
     for (const c of s.categories) {
       const r = refs.cats[c.category];
       const isOver = c.budget !== null && c.projected > c.budget;
+      setAlt(r.limitAlt, c.budget ?? 0);
       r.planned.textContent = money(c.planned);
       r.spent.textContent = money(c.spent);
-      r.projected.textContent = money(c.projected);
+      r.projected.replaceChildren(money(c.projected), alt(c.projected, current.currency) ?? "");
       r.projected.className = `r num ${isOver ? "bad strong" : ""}`;
       r.bar.replaceChildren(c.budget
         ? h("div", { class: "bar", title: `${Math.round((c.projected / c.budget) * 100)}% of budget` },
@@ -909,11 +1061,13 @@ function budgetView(trip, days) {
     refs.foot.budget.textContent = hasBudget ? money(s.totalBudget) : "";
     refs.foot.planned.textContent = money(s.totalPlanned);
     refs.foot.spent.textContent = money(s.totalSpent);
-    refs.foot.projected.textContent = money(s.totalProjected);
+    refs.foot.projected.replaceChildren(money(s.totalProjected), alt(s.totalProjected, current.currency) ?? "");
   }
 
   update();
   return view;
 }
 
+updateHomeButton();
 render();
+loadRates();

@@ -355,3 +355,20 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 .info-credit { margin-top: 8px; }
 .info-inline { margin-top: 6px; }
 .info-inline .info { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+
+/* Home currency: "≈ S$12.30" under trip-currency amounts */
+.home-btn { padding: 5px 10px; font-size: 0.82rem; height: 34px; }
+.alt { display: block; font-size: 0.75rem; font-weight: 450; color: var(--subtle); }
+.item-cost .alt { font-size: 0.72rem; }
+.summary-alt { font-size: 0.85rem; }
+.summary-amt { text-align: right; }
+.budget td .alt { white-space: nowrap; }
+.budget td.limit .alt { margin-top: 2px; }
+.cost-hint { min-height: 1.1em; font-weight: 450; }
+.rate-note a { color: inherit; }
+.linkish { border: 0; padding: 0; background: none; color: var(--accent-strong); font: inherit; text-decoration: underline; cursor: pointer; }
+.home-card { margin-bottom: 20px; }
+.home-card h2 { margin-bottom: 4px; }
+.home-card > p { margin: 0 0 12px; max-width: 60ch; }
+@media (max-width: 420px) { .home-btn { margin-left: auto; } .theme-toggle { margin-left: 0; } }
+.items > li { min-width: 0; }
