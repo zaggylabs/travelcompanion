@@ -13,7 +13,7 @@ Plain static site: no build step, no API keys. The only server code is one Cloud
 | `assets/js/autocomplete.js` | Suggestion dropdown used for countries and places |
 | `assets/js/theme.js` | Light/dark toggle (loaded before CSS) |
 | `assets/js/lib/*.js` | Logic with no DOM, unit tested in `tests/` |
-| `functions/api/link-preview.js` | Pages Function: `GET /api/link-preview?url=` fetches a booking page (allowlisted hosts only, follows share-link redirects, 8 s timeout, cached a day) and returns its name, address, rating, photo via `pagemeta.js`. Not served by `python3 -m http.server`; the app falls back to guessing from the URL |
+| `functions/api/link-preview.js` | Pages Function: `GET /api/link-preview?url=` fetches a booking page (allowlisted hosts only, follows share-link redirects, 8 s timeout, cached a day) and returns its name, address, rating, photo via `pagemeta.js`. Not served by `python3 -m http.server`. Tested 2026-11-24: Airbnb works; Booking.com (AWS WAF challenge), Agoda (no data in its HTML) and Klook (403) can't be read, so the app takes the name from the URL and matches it on the map with Photon |
 
 ### lib
 

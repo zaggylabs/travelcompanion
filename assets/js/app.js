@@ -1479,9 +1479,21 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
       // Followed a share link? Its real address may name the place.
       const real = r?.url ? parseBookingLink(r.url) : null;
       if (real?.name && titleIsOurs()) setTitle(real.name);
-      hint(siteChip(b.url), titleInput.value.trim()
-        ? ` ${b.site} didn't let us read the page, so the name is a guess from the link. Pick it from the suggestions to fill in the rest.`
-        : ` ${b.site} didn't let us read the page. Type the place's name above and pick it from the suggestions.`);
+      const guess = titleInput.value.trim();
+      if (!guess) return hint(siteChip(b.url), ` ${b.site} doesn't let apps read its pages, and this link doesn't include the name. Type it above and pick it from the suggestions.`);
+      // Use the name from the link to find the place on the map, for its area and Maps link.
+      hint(siteChip(b.url), ` ${b.site} doesn't let apps read its pages, so we're finding "${guess}" on the map…`);
+      const found = await matchPlace(guess, ccs, {}, controller.signal).catch(() => null);
+      if (controller.signal.aborted) return;
+      if (!found) return hint(siteChip(b.url), ` ${b.site} doesn't let apps read its pages, so the name is a guess from the link. Pick it from the suggestions to fill in the rest.`);
+      if (titleIsOurs()) setTitle(found.name);
+      const area = [found.area, !country && found.country].filter(Boolean).join(", ");
+      if (area && (!locationInput.value.trim() || locationInput.value === autoLocation)) locationInput.value = autoLocation = area;
+      const g = groupForPlace(found);
+      if (g && !groupTouched) groupSelect.value = g;
+      picked = { link: mapsLink(found), place: found.osm ? { osm: found.osm, lat: found.lat, lon: found.lon, kind: found.kind, area: found.area, ...(found.countryCode ? { cc: found.countryCode } : {}) } : undefined };
+      if (activeInfo?.isConnected) fillInfo(activeInfo, { ...ideaAsItem(idea), title: titleInput.value, group: groupSelect.value, place: picked.place }, trip, days);
+      hint(siteChip(b.url), ` Found on the map from the name in the link (${b.site} doesn't let apps read its pages). Check it's the right place.`);
     }, 300);
   };
   linkInput.addEventListener("input", () => readLink());

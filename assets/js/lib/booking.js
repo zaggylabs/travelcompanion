@@ -46,6 +46,7 @@ function slugName(slug) {
   s = s.replace(/^\d+[-_]/, "").replace(/[-_]?(t|d|g|h|l|ho)\d+$/i, "");
   s = s.replace(/[-_+]+/g, " ").trim();
   if (!/[a-z]{3}/i.test(s) || /^\d+$/.test(s) || s.length > 90) return null;
+  if (/^(hotels?|rooms?|stays?|activit(y|ies)|detail|product|share|sp|tours?|things to do)$/i.test(s)) return null;
   return titleCase(s.toLowerCase());
 }
 
