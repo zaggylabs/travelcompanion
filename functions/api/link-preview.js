@@ -48,7 +48,7 @@ export async function onRequestGet({ request, waitUntil }) {
   // Airbnb's is a self-submitting form that sends you to your country's domain (airbnb.co.uk…).
   const small = html.length < 20000;
   const refresh = small && (html.match(/<meta[^>]+http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["'][^"']*url\s*=\s*([^"'\s>]+)/i)
-    ?? (/<title>\s*redirecting/i.test(html) && html.match(/<form[^>]+action\s*=\s*["']([^"']+)["']/i)));
+    ?? (() => { const m = html.match(/<title[^>]*>\s*redirecting to\s+([a-z0-9.-]+\.[a-z]{2,})/i); const u = new URL(url); return m && [, `https://${m[1]}${u.pathname}${u.search}`]; })());
   if (refresh) {
     try {
       const next = new URL(refresh[1].replace(/&amp;/g, "&"), url);
