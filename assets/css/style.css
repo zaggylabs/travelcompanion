@@ -530,3 +530,15 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 .city-group-head { margin: 0; }
 .guide-countries { display: flex; flex-wrap: wrap; gap: 6px; }
 .made-of { margin: 2px 0 0; }
+
+/* Discover: "Your days" shortcuts, one row per country */
+.disc-days { display: grid; gap: 6px; }
+.disc-days-title { font-weight: 600; }
+.disc-days-row { display: flex; align-items: baseline; gap: 10px; }
+.disc-days-country { flex: 0 0 7.5rem; color: var(--subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.disc-days-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.chip.plain { border-style: dashed; }
+@media (max-width: 600px) {
+  .disc-days-row { flex-direction: column; gap: 4px; }
+  .disc-days-country { flex: none; }
+}

@@ -1481,6 +1481,32 @@ function dayStops(trip, days) {
   return stops;
 }
 
+/**
+ * "Your days" shortcuts: one row per country (in the order you get there), days first in
+ * day order, then the trip's other cities in that country. One-country trips get one row.
+ */
+function stopRows(stops, ccs, d, onPick) {
+  if (!stops.length) return null;
+  const firstDay = (code) => Math.min(...stops.filter((s) => s.country === code && s.dates.length).map((s) => s.start));
+  const order = [...new Set([...ccs, ...stops.map((s) => s.country)])].filter(Boolean)
+    .sort((a, b) => (firstDay(a) - firstDay(b)) || ccs.indexOf(a) - ccs.indexOf(b));
+  const groups = ccs.length > 1 ? order.map((code) => ({ code, stops: stops.filter((s) => s.country === code) })).filter((g) => g.stops.length) : [{ code: "", stops }];
+  const chip = (st) => h("button", { class: `chip small${d.stop === st.full && d.areaText === st.text ? " active" : ""}${st.dates.length ? "" : " plain"}`, type: "button",
+    title: st.dates.length ? `Search around ${st.full}, and add finds to ${st.label} by default` : `Search around ${st.full}`,
+    onclick: () => onPick(st) },
+    st.label && h("span", { class: "muted" }, `${st.label} · `), st.full);
+  return h("div", { class: "disc-days" },
+    h("span", { class: "small muted disc-days-title" }, "Your days"),
+    groups.map((g) => {
+      const c = getCountry(g.code);
+      return h("div", { class: "disc-days-row" },
+        c && h("span", { class: "disc-days-country small" }, FLAGS_OK ? `${flag(c.code)} ` : "", c.name),
+        h("div", { class: "disc-days-chips" },
+          g.stops.filter((s) => s.dates.length).map(chip),
+          g.stops.filter((s) => !s.dates.length).map(chip)));
+    }));
+}
+
 function useStop(d, stop) {
   d.areaText = stop.text;
   d.near = stop.point; // if the area still needs looking up, look around its city
@@ -1595,12 +1621,8 @@ function discoverView(trip, days) {
       field("Looking for (optional)", keywordInput, "span-2"),
       field("Within", radiusSelect, "span-1")),
     h("div", { class: "actions" },
-      h("button", { class: "btn primary", type: "submit", disabled: d.status === "loading" }, d.status === "loading" ? "Searching…" : "Search"),
-      stops.length > 0 && h("span", { class: "small muted" }, "Your days:"),
-      stops.map((st) => h("button", { class: `chip small${d.stop === st.full && d.areaText === st.text ? " active" : ""}`, type: "button",
-        title: st.dates.length ? `Search around ${st.full}, and add finds to ${st.label} by default` : `Search around ${st.full}`,
-        onclick: () => { useStop(d, st); areaInput.value = st.text; search(); } },
-        st.label && h("span", { class: "muted" }, `${st.label} · `), ccs.length > 1 && FLAGS_OK && st.country ? `${flag(st.country)} ` : "", st.full))),
+      h("button", { class: "btn primary", type: "submit", disabled: d.status === "loading" }, d.status === "loading" ? "Searching…" : "Search")),
+    stopRows(stops, ccs, d, (st) => { useStop(d, st); areaInput.value = st.text; search(); }),
     stops.every((st) => !st.dates.length) && days.length > 0 && h("p", { class: "small muted" },
       "Tip: pick where you'll be each day on the Itinerary (the 📍 next to each day) and Discover will start there."));
   form.addEventListener("submit", (e) => { e.preventDefault(); search(); });
