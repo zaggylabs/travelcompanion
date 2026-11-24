@@ -202,9 +202,13 @@ export async function discoverPlaces(params, signal) {
 
   const body = new URLSearchParams({ data: buildQuery(params) });
   let lastError = null;
+  // Overpass gets 10 seconds in all; after that a quick basic list beats a long wait.
+  const deadline = Date.now() + 10000;
   for (const url of OVERPASS_ENDPOINTS) {
+    const left = deadline - Date.now();
+    if (left < 1500) break;
     try {
-      const timeout = AbortSignal.timeout(15000);
+      const timeout = AbortSignal.timeout(left);
       const res = await fetch(url, { method: "POST", body, signal: signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal ?? timeout });
       if (!res.ok) { lastError = new Error(`Overpass ${res.status}`); continue; }
       const data = await res.json(); // a busy server can answer with an HTML page, which lands in the catch
