@@ -1,9 +1,11 @@
 import { CATEGORIES, newId } from "./lib/constants.js";
+import { prettyHours } from "./lib/placeinfo.js";
 import { ALL_CURRENCIES, findCountry, flag, getCountry, searchCountries } from "./lib/countries.js";
 import { mapsLink, searchPlaces } from "./lib/places.js";
 import { crowdTip, dayNote, getHolidays, getPlaceInfo } from "./lib/placeinfo.js";
 import { GUIDES_CHECKED, SCHENGEN_NOTE, getGuide, homeAdviceLink, isSchengen, visaFor, visaOverviewLink, wikivoyageUrl } from "./lib/guides.js";
 import { getWikivoyage } from "./lib/wikivoyage.js";
+import { DISCOVER_TYPES, RADII, discoverPlaces, discoverType, formatDistance, sortResults } from "./lib/discover.js";
 import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
@@ -56,6 +58,7 @@ const ui = {
   selectedIdea: null, // saved place whose info shows in the info panel
   editingIdea: null, // saved place id being edited
   schedulingIdea: null, // saved place id whose "Add to itinerary" picker is open
+  discover: null, // the Discover tab's search and results (see discoverState)
 };
 
 /* ---------- home currency ---------- */
@@ -127,7 +130,7 @@ function currentTripId() {
 }
 
 function openTrip(id) {
-  Object.assign(ui, { tab: "itinerary", selectedItem: null, editingTrip: false, confirmDelete: false, editingItem: null, notice: null, attachOpen: null, attachError: null, confirmRemoveFile: null, selectedIdea: null, editingIdea: null, schedulingIdea: null });
+  Object.assign(ui, { tab: "itinerary", selectedItem: null, editingTrip: false, confirmDelete: false, editingItem: null, notice: null, attachOpen: null, attachError: null, confirmRemoveFile: null, selectedIdea: null, editingIdea: null, schedulingIdea: null, discover: null });
   location.hash = id ? `trip/${encodeURIComponent(id)}` : "";
   if (!id) history.replaceState(null, "", location.pathname + location.search);
   render();
@@ -392,18 +395,19 @@ function tripView(trip) {
       h("button", { type: "button", "aria-label": "Dismiss", onclick: () => { ui.notice = null; render(); } }, "✕")),
     h("div", { class: "trip-layout" },
       WIDE.matches && h("aside", { class: "trip-info", "aria-label": "About this place" },
-        infoPanel(ui.tab === "ideas" ? ideaAsItem(selectedIdea(trip)) : selectedItem(trip, days), trip, days)),
+        infoPanel(ui.tab === "ideas" ? ideaAsItem(selectedIdea(trip)) : ui.tab === "discover" ? discoverAsItem(selectedResult(trip), trip) : selectedItem(trip, days), trip, days)),
       h("div", { class: "trip-main stack" },
         h("div", { class: "tabs", role: "tablist" }, Object.entries(TABS).map(([t, label]) =>
           h("button", { role: "tab", type: "button", "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
             onclick: () => { Object.assign(ui, { tab: t, editingItem: null, attachOpen: null, editingIdea: null, schedulingIdea: null }); render(); } },
             label, t === "ideas" && trip.ideas?.length ? h("span", { class: "tab-count num" }, trip.ideas.length) : null))),
-        ui.tab === "guide" ? guideView(trip) : ui.tab === "budget" ? budgetView(trip, days) : ui.tab === "ideas" ? ideasView(trip, days) : itineraryView(trip, days)),
+        ui.tab === "guide" ? guideView(trip) : ui.tab === "budget" ? budgetView(trip, days) : ui.tab === "ideas" ? ideasView(trip, days)
+          : ui.tab === "discover" ? discoverView(trip, days) : itineraryView(trip, days)),
       h("aside", { class: "trip-budget", "aria-label": "Budget" },
         budgetSummary(trip, days))));
 }
 
-const TABS = { itinerary: "Itinerary", ideas: "Saved places", budget: "Budget", guide: "Good to know" };
+const TABS = { itinerary: "Itinerary", discover: "Discover", ideas: "Saved places", budget: "Budget", guide: "Good to know" };
 
 /* ----- "Good to know" tab: entry rules, etiquette, money, plugs, emergency numbers ----- */
 
@@ -815,7 +819,11 @@ function ideasView(trip, days) {
             ui.editingIdea === idea.id
               ? ideaForm(idea, trip, days, saveEdit, cancel, () => remove(idea), true)
               : [ideaRow(idea, trip, days, selected?.id === idea.id),
-                 ui.schedulingIdea === idea.id && schedulePanel(idea, trip, days),
+                 ui.schedulingIdea === idea.id && schedulePanel(idea.title, days, (date, time) => {
+                   const current = loadTrips().find((t) => t.id === trip.id);
+                   if (current) saveTrip({ ...current, items: [...current.items, ideaToItem(idea, date, time)] });
+                   ui.schedulingIdea = null;
+                 }, () => { ui.schedulingIdea = null; }),
                  !WIDE.matches && selected?.id === idea.id && ui.selectedIdea === idea.id && h("div", { class: "info-inline" }, infoPanel(ideaAsItem(idea), trip, days))]))))),
     ideas.length > 0 && h("p", { class: "small muted" }, "Saved places stay in this browser and aren't part of CSV exports. Plans you add from them are."));
 }
@@ -849,7 +857,8 @@ function ideaRow(idea, trip, days, selected) {
     h("button", { class: "attach-btn", type: "button", "aria-label": `Edit ${idea.title}`, title: "Edit", onclick: edit }, pencilIcon()));
 }
 
-function schedulePanel(idea, trip, days) {
+/** "Add <title> to your itinerary" with a day and an optional time. `onAdd(date, time)` saves it. */
+function schedulePanel(title, days, onAdd, onCancel) {
   const fallback = days.includes(ui.lastScheduleDate) ? ui.lastScheduleDate : days[0] ?? "";
   const daySelect = days.length
     ? h("select", { name: "date", autofocus: true },
@@ -857,23 +866,21 @@ function schedulePanel(idea, trip, days) {
         h("option", { value: "" }, "Unscheduled"))
     : h("input", { name: "date", type: "date", autofocus: true, value: ui.lastScheduleDate || "" });
   const form = h("form", { class: "attach-panel card schedule-panel" },
-    h("p", { class: "small" }, "Add ", h("strong", null, idea.title), " to your itinerary"),
+    h("p", { class: "small" }, "Add ", h("strong", null, title), " to your itinerary"),
     h("div", { class: "schedule-row" },
       field("Day", daySelect),
       field("Time (optional)", h("input", { name: "time", type: "time" })),
       h("div", { class: "actions" },
         h("button", { class: "btn primary", type: "submit" }, "Add"),
-        h("button", { class: "btn", type: "button", onclick: () => { ui.schedulingIdea = null; render(); } }, "Cancel"))),
+        h("button", { class: "btn", type: "button", onclick: () => { onCancel(); render(); } }, "Cancel"))),
     days.length === 0 && h("p", { class: "small muted" }, "Tip: set the trip's dates in Edit trip to pick from Day 1, Day 2 and so on."));
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const f = new FormData(form);
     const date = String(f.get("date") ?? "");
     const time = String(f.get("time") ?? "");
-    const current = loadTrips().find((t) => t.id === trip.id);
-    if (!current) return;
-    saveTrip({ ...current, items: [...current.items, ideaToItem(idea, date, time)] });
-    Object.assign(ui, { schedulingIdea: null, lastScheduleDate: date });
+    onAdd(date, time);
+    ui.lastScheduleDate = date;
     render();
   });
   return form;
@@ -943,6 +950,221 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
     });
   });
   return form;
+}
+
+/* ----- discover: find places near an area, from OpenStreetMap ----- */
+
+const OSM_COPYRIGHT = "https://www.openstreetmap.org/copyright";
+const PAGE = 20;
+let discoverController = null;
+
+function discoverState(trip) {
+  if (ui.discover?.tripId !== trip.id) {
+    ui.discover = {
+      tripId: trip.id, type: "food", radius: 1000, sort: "near", keyword: "", areaText: "", area: null,
+      status: "idle", results: null, resultType: null, error: null, cached: false, shown: PAGE, selected: null, scheduling: null,
+    };
+  }
+  return ui.discover;
+}
+
+/** "Tokyo & Osaka" -> ["Tokyo", "Osaka"], offered as one-tap areas. */
+const destinationAreas = (trip) => [...new Set(String(trip.destination ?? "")
+  .split(/\s*(?:,|&|\/|\+|\band\b)\s*/i).map((s) => s.trim()).filter((s) => s.length >= 2))].slice(0, 4);
+
+const areaFrom = (p, text) => ({ text, name: p.name, label: [p.name, p.area].filter(Boolean).join(", "), lat: p.lat, lon: p.lon });
+
+function selectedResult(trip) {
+  const d = discoverState(trip);
+  return d.results?.find((r) => r.osm === d.selected) ?? null;
+}
+
+const resultLink = (r, d, trip) => mapsLink({ name: r.name, area: d.area?.name, country: getCountry(trip.country)?.name });
+const resultPlace = (r, d) => ({ osm: r.osm, lat: r.lat, lon: r.lon, kind: r.kind.toLowerCase(), area: d.area?.label ?? "" });
+
+// The info panel works on plans, so give it a search result in that shape.
+function discoverAsItem(r, trip) {
+  if (!r) return null;
+  const d = discoverState(trip);
+  const t = discoverType(d.resultType);
+  return {
+    id: `disc:${r.osm}`, title: r.name, location: d.area?.label ?? "", link: resultLink(r, d, trip), place: resultPlace(r, d),
+    category: t.category, date: "", time: "",
+    nearby: `${formatDistance(r.distance)} from ${d.area?.name ?? "the search spot"}`,
+  };
+}
+
+async function runDiscover(trip) {
+  const d = discoverState(trip);
+  const country = getCountry(trip.country);
+  discoverController?.abort();
+  const controller = (discoverController = new AbortController());
+  Object.assign(d, { status: "loading", error: null, results: null, shown: PAGE, selected: null, scheduling: null });
+  render();
+  try {
+    if (!d.area || d.area.text !== d.areaText) {
+      const found = (await searchPlaces(d.areaText, country?.code, controller.signal))[0];
+      if (!found) {
+        throw Object.assign(new Error("no area"), {
+          userText: `Couldn't find "${d.areaText}"${country ? ` in ${country.name}` : ""}. Try a neighbourhood, station or landmark.`,
+        });
+      }
+      d.area = areaFrom(found, d.areaText);
+    }
+    const { results, cached } = await discoverPlaces(
+      { type: d.type, lat: d.area.lat, lon: d.area.lon, radius: d.radius, keyword: d.keyword }, controller.signal);
+    if (controller !== discoverController) return;
+    Object.assign(d, { status: "done", results, cached, resultType: d.type });
+  } catch (e) {
+    if (controller.signal.aborted) return;
+    Object.assign(d, { status: "error", error: e.userText ?? "Couldn't reach the free OpenStreetMap search just now. It may be busy, so try again in a minute." });
+  }
+  if (ui.tab === "discover" && currentTripId() === trip.id) render();
+}
+
+function discoverView(trip, days) {
+  const d = discoverState(trip);
+  const country = getCountry(trip.country);
+  const type = discoverType(d.type);
+
+  const areaInput = h("input", {
+    name: "area", required: true, value: d.areaText, autofocus: !d.areaText || null,
+    placeholder: country ? `A neighbourhood, station or landmark in ${country.name}` : "A neighbourhood, station or landmark",
+  });
+  const areaBox = autocomplete(areaInput, {
+    delay: 350,
+    search: (q, signal) => searchPlaces(q, country?.code, signal),
+    renderItem: (p) => [
+      h("span", { class: "ac-icon", "aria-hidden": "true" }, "📍"),
+      h("span", { class: "ac-main" }, h("span", { class: "ac-title" }, p.name), h("span", { class: "ac-sub small muted" }, p.area)),
+      p.kind && h("span", { class: "ac-tag" }, p.kind),
+    ].filter(Boolean),
+    footer: () => h("span", { class: "small muted" }, "Places from © OpenStreetMap contributors"),
+    onPick: (p) => { areaInput.value = p.name; d.areaText = p.name; d.area = areaFrom(p, p.name); },
+  });
+  const keywordInput = h("input", { name: "keyword", value: d.keyword, placeholder: type.placeholder, maxlength: 40 });
+  const radiusSelect = h("select", { name: "radius" }, RADII.map((r) => h("option", { value: r, selected: r === d.radius }, formatDistance(r))));
+
+  // Read the boxes into the state before anything re-renders them.
+  const sync = () => {
+    d.areaText = areaInput.value.trim();
+    d.keyword = keywordInput.value.trim();
+    d.radius = Number(radiusSelect.value) || 1000;
+  };
+  const search = () => { sync(); if (d.areaText) runDiscover(trip); else areaInput.focus(); };
+
+  const typeChips = h("div", { class: "disc-types", role: "group", "aria-label": "What to look for" }, DISCOVER_TYPES.map((t) =>
+    h("button", { type: "button", class: `chip${t.key === d.type ? " active" : ""}`, "aria-pressed": String(t.key === d.type),
+      onclick: () => {
+        sync();
+        if (t.key !== d.type) d.keyword = "";
+        d.type = t.key;
+        if (d.areaText && d.status !== "idle") runDiscover(trip); else render();
+      } },
+    h("span", { "aria-hidden": "true" }, t.icon), " ", t.label)));
+
+  const areas = destinationAreas(trip);
+  const form = h("form", { class: "card pad stack disc-form" },
+    h("div", null,
+      h("h2", null, "Discover"),
+      h("p", { class: "small muted" }, "Find places to eat, see and shop near anywhere on your trip. Save the ones you like, or add them straight to a day.")),
+    typeChips,
+    h("div", { class: "form-grid six" },
+      field("Near", areaBox.el, "span-3"),
+      field("Looking for (optional)", keywordInput, "span-2"),
+      field("Within", radiusSelect, "span-1")),
+    h("div", { class: "actions" },
+      h("button", { class: "btn primary", type: "submit", disabled: d.status === "loading" }, d.status === "loading" ? "Searching…" : "Search"),
+      areas.length > 0 && h("span", { class: "small muted" }, "Try:"),
+      areas.map((a) => h("button", { class: "chip small", type: "button", onclick: () => { areaInput.value = a; search(); } }, a))));
+  form.addEventListener("submit", (e) => { e.preventDefault(); search(); });
+
+  return h("div", { class: "stack disc" }, form, discoverResults(trip, days, d));
+}
+
+function discoverResults(trip, days, d) {
+  if (d.status === "idle") {
+    return h("p", { class: "card pad center muted" }, "Pick what you're after, type an area like a neighbourhood or station, and press Search.");
+  }
+  if (d.status === "loading") {
+    return h("p", { class: "card pad center muted info-loading" }, `Looking for ${discoverType(d.type).label.toLowerCase()} near ${d.area?.text === d.areaText ? d.area.name : d.areaText}…`);
+  }
+  if (d.status === "error") {
+    return h("div", { class: "card pad center" }, h("p", { class: "muted" }, d.error),
+      h("button", { class: "btn", type: "button", onclick: () => runDiscover(trip) }, "Try again"));
+  }
+  const type = discoverType(d.resultType);
+  const list = sortResults(d.results, d.sort);
+  const credit = h("p", { class: "small muted disc-credit" },
+    "Places © ", h("a", { href: OSM_COPYRIGHT, target: "_blank", rel: "noopener" }, "OpenStreetMap contributors"),
+    ". OpenStreetMap has no ratings or reviews, so we don't show any. Use the Reviews link to read them on Google Maps.");
+  if (!list.length) {
+    return h("div", { class: "stack" },
+      h("p", { class: "card pad center muted" }, `No ${type.label.toLowerCase()} ${d.keyword ? `matching "${d.keyword}" ` : ""}found within ${formatDistance(d.radius)} of ${d.area.label}.`,
+        d.radius < 2000 ? " Try a bigger distance" : " Try another area", d.keyword ? " or clear the keyword." : "."),
+      credit);
+  }
+  const selected = selectedResult(trip);
+  const sortSelect = h("select", { "aria-label": "Sort by", onchange: (e) => { d.sort = e.target.value; d.shown = PAGE; render(); } },
+    h("option", { value: "near", selected: d.sort === "near" }, "Nearest first"),
+    h("option", { value: "info", selected: d.sort === "info" }, "Most details first"));
+  return h("div", { class: "stack" },
+    h("div", { class: "disc-head" },
+      h("p", { class: "small muted" }, `${plural(list.length, "place")} within ${formatDistance(d.radius)} of `, h("strong", null, d.area.label)),
+      sortSelect),
+    h("ul", { class: "items" }, list.slice(0, d.shown).map((r) => h("li", null,
+      discoverRow(r, trip, days, d, type, selected?.osm === r.osm),
+      d.scheduling === r.osm && schedulePanel(r.name, days, (date, time) => {
+        const current = loadTrips().find((t) => t.id === trip.id);
+        if (!current) return;
+        const item = { ...emptyItem(date), time, title: r.name, location: d.area.label, category: type.category, link: resultLink(r, d, trip), place: resultPlace(r, d) };
+        saveTrip({ ...current, items: [...current.items, item] });
+        d.scheduling = null;
+      }, () => { d.scheduling = null; }),
+      !WIDE.matches && selected?.osm === r.osm && h("div", { class: "info-inline" }, infoPanel(discoverAsItem(r, trip), trip, days))))),
+    list.length > d.shown && h("button", { class: "btn", type: "button", onclick: () => { d.shown += PAGE; render(); } },
+      `Show ${Math.min(PAGE, list.length - d.shown)} more`),
+    credit);
+}
+
+function discoverRow(r, trip, days, d, type, selected) {
+  const saved = (trip.ideas ?? []).find((i) => i.place?.osm === r.osm);
+  const plans = trip.items.filter((i) => i.place?.osm === r.osm);
+  const scheduling = d.scheduling === r.osm;
+  const hours = prettyHours(r.hours);
+  const save = () => {
+    if (saved) return;
+    updateIdeas(trip.id, (list) => [...list, {
+      ...emptyIdea(type.group), title: r.name, location: d.area.label, link: resultLink(r, d, trip), place: resultPlace(r, d),
+    }]);
+    render();
+  };
+  return h("div", { class: `item-wrap idea disc-row${selected ? " selected" : ""}` },
+    h("div", { class: "item idea-card", role: "button", tabindex: "0", "aria-pressed": String(Boolean(selected)), title: "Show info about this place",
+      onclick: (e) => {
+        if (e.target.closest("a, button")) return;
+        d.selected = selected ? null : r.osm;
+        render();
+      },
+      onkeydown: (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); e.currentTarget.click(); } } },
+      h("span", { class: "item-main" },
+        h("span", { class: "item-title" }, r.name),
+        h("span", { class: "item-meta" },
+          h("span", null, [r.cuisine || r.kind, r.cuisine && r.kind !== "Restaurant" ? r.kind : ""].filter(Boolean).join(" · ")),
+          r.localName && h("span", null, r.localName),
+          hours.length > 0 && h("span", { title: hours.join("\n") }, `🕒 ${hours[0]}${hours.length > 1 ? " …" : ""}`)),
+        h("span", { class: "item-meta disc-links" },
+          h("a", { href: resultLink(r, d, trip), target: "_blank", rel: "noopener noreferrer" }, "Reviews and map ↗"),
+          r.website && h("a", { href: r.website, target: "_blank", rel: "noopener noreferrer" }, "Website ↗")),
+        plans.length > 0 && h("span", { class: "idea-plans" }, plans.map((p) =>
+          h("button", { class: "idea-plan", type: "button", title: "Show it in the itinerary", onclick: () => goToPlan(p.id) },
+            "✓ ", dayLabel(p.date, days), p.time && ` · ${p.time}`)))),
+      h("span", { class: "item-cost num muted" }, formatDistance(r.distance))),
+    h("button", { class: `btn disc-save${saved ? " done" : ""}`, type: "button", disabled: Boolean(saved),
+      title: saved ? "It's in Saved places" : "Keep it in Saved places for later", onclick: save }, saved ? "✓ Saved" : "Save"),
+    h("button", { class: `btn idea-add${scheduling ? " active" : ""}`, type: "button", "aria-expanded": String(scheduling),
+      onclick: () => { d.scheduling = scheduling ? null : r.osm; d.selected = r.osm; render(); } },
+      plans.length ? "Add again" : "Add to itinerary"));
 }
 
 /* ----- attachments ----- */
@@ -1197,7 +1419,9 @@ function fillInfo(box, item, trip, days) {
       h("h2", null, "Place info"),
       h("p", { class: "small muted" }, ui.tab === "ideas"
         ? "Save a place, then pick it to see opening hours, a short guide and crowd tips here."
-        : "Add a plan, then pick it in the itinerary to see opening hours, a short guide and crowd tips here.")));
+        : ui.tab === "discover"
+          ? "Search for places, then pick one to see opening hours, a short guide and crowd tips here."
+          : "Add a plan, then pick it in the itinerary to see opening hours, a short guide and crowd tips here.")));
     return;
   }
   const country = getCountry(trip.country);
@@ -1218,7 +1442,7 @@ function infoContent(item, trip, days, info, hol) {
   const data = info?.value ?? null;
   const loading = !info;
   const dayIdx = days.indexOf(item.date);
-  const when = item.saved ? `Saved place · ${groupOf(item.group).label}` : [item.date ? (dayIdx >= 0 ? `Day ${dayIdx + 1} · ${formatDay(item.date)}` : formatDay(item.date)) : "Unscheduled", item.time].filter(Boolean).join(" · ");
+  const when = item.saved ? `Saved place · ${groupOf(item.group).label}` : item.nearby ? item.nearby : [item.date ? (dayIdx >= 0 ? `Day ${dayIdx + 1} · ${formatDay(item.date)}` : formatDay(item.date)) : "Unscheduled", item.time].filter(Boolean).join(" · ");
   const kind = data?.kind || item.place?.kind || "";
   const section = (title, ...body) => h("section", { class: "info-sec" }, h("h3", null, title), ...body);
   const extLink = (href, text) => h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text);
@@ -1229,7 +1453,7 @@ function infoContent(item, trip, days, info, hol) {
   const tip = crowdTip(kind, item.category);
   const crowds = section("Busy times",
     note && h("p", { class: `info-day ${note.busy ? "busy" : "quiet"}` }, note.text),
-    !item.date && h("p", { class: "small muted" }, item.saved ? "Add it to a day to see if that day is a weekend or public holiday." : "Give this plan a day to see if it falls on a weekend or public holiday."),
+    !item.date && h("p", { class: "small muted" }, item.saved || item.nearby ? "Add it to a day to see if that day is a weekend or public holiday." : "Give this plan a day to see if it falls on a weekend or public holiday."),
     tip && h("p", { class: "small" }, h("span", { class: "muted" }, "General tip: "), tip),
     h("p", { class: "small muted" }, "There's no free source of real peak hours for a place, so we don't guess. Google Maps shows ",
       extLink(maps, "Popular times"), " for most places."));
