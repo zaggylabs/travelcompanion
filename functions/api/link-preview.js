@@ -58,6 +58,8 @@ export async function onRequestGet({ request, waitUntil }) {
       }
     } catch { /* keep the first page */ }
   }
+  const probe = new URL(request.url).searchParams.get("probe"); // TEMP: see how a site embeds its data
+  if (probe) return json({ bytes: html.length, hits: [...html.matchAll(new RegExp(`.{0,160}${probe.replace(/\W/g, "")}.{0,160}`, "gi"))].slice(0, 12).map((m) => m[0]) });
   const meta = parsePageMeta(html, url);
   // Say what came back, so a blocked site is easy to tell apart from a page we can't parse.
   if (meta.blocked && !meta.name) return json({ ok: false, error: "blocked", url, status: res.status, bytes: html.length, title: (html.match(/<title[^>]*>([\s\S]{0,120})/i)?.[1] ?? "").trim() });
