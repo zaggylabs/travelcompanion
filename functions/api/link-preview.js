@@ -43,7 +43,18 @@ export async function onRequestGet({ request, waitUntil }) {
   if (!res.ok) return json({ ok: false, error: `status-${res.status}`, url });
   if (!/html/i.test(res.headers.get("content-type") ?? "")) return json({ ok: false, error: "not-html", url });
 
-  const html = await res.text();
+  let html = await res.text();
+  // Some sites (Airbnb) answer with a tiny "Redirecting…" page that uses a meta refresh instead of a 3xx.
+  const refresh = html.length < 20000 && html.match(/<meta[^>]+http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["'][^"']*url\s*=\s*([^"'\s>]+)/i);
+  if (refresh) {
+    try {
+      const next = new URL(refresh[1].replace(/&amp;/g, "&"), url);
+      if (isPreviewHost(next.hostname)) {
+        const again = await fetch(next.href, { headers: HEADERS, signal: AbortSignal.timeout(8000) });
+        if (again.ok) { url = again.url || next.href; html = await again.text(); }
+      }
+    } catch { /* keep the first page */ }
+  }
   const meta = parsePageMeta(html, url);
   // Say what came back, so a blocked site is easy to tell apart from a page we can't parse.
   if (meta.blocked && !meta.name) return json({ ok: false, error: "blocked", url, status: res.status, bytes: html.length, title: (html.match(/<title[^>]*>([\s\S]{0,120})/i)?.[1] ?? "").trim() });

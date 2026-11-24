@@ -83,7 +83,7 @@ function addressParts(a) {
 }
 
 // Bot checks and error pages say nothing about the place.
-const BLOCKED = /just a moment|attention required|access denied|are you a (robot|human)|robot or human|captcha|verify you are|pardon our interruption|security check|page not found|404|error/i;
+const BLOCKED = /^redirecting|just a moment|attention required|access denied|are you a (robot|human)|robot or human|captcha|verify you are|pardon our interruption|security check|page not found|404|error/i;
 
 /** "Hotel Gracery Shinjuku, Tokyo – Updated 2026 Prices" -> "Hotel Gracery Shinjuku" (using the city when known). */
 export function cleanTitle(title, locality) {
