@@ -102,3 +102,12 @@ export function parseBookingLink(text) {
 
 /** Short label for a saved link: the site's name, or its host. */
 export const linkSite = (url) => parseBookingLink(url)?.site ?? null;
+
+// Hosts the /api/link-preview function may fetch: the booking sites above (not Google) and their short links.
+const SHORT_LINKS = ["abnb.me", "agoda.to", "bkng.it", "klook.page.link", "trip.com", "s.klook.com", "app.agoda.com", "kkday.page.link"];
+export function isPreviewHost(hostname) {
+  const host = String(hostname ?? "").toLowerCase().replace(/^www\./, "");
+  if (SHORT_LINKS.some((s) => host === s || host.endsWith(`.${s}`))) return true;
+  return SITES.some(([suffix, site]) => site !== "Google Maps" &&
+    (suffix.endsWith(".") ? host.split(".").includes(suffix.slice(0, -1)) : host === suffix || host.endsWith(`.${suffix}`)));
+}

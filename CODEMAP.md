@@ -1,7 +1,7 @@
 # Code map
 
 A short guide to where things are, so changes can start here instead of reading every file.
-Plain static site: no build step, no backend, no API keys. Cloudflare Pages serves the repo root and deploys every push to `main`.
+Plain static site: no build step, no API keys. The only server code is one Cloudflare Pages Function (below). Cloudflare Pages serves the repo root and deploys every push to `main`.
 
 ## Files
 
@@ -13,6 +13,7 @@ Plain static site: no build step, no backend, no API keys. Cloudflare Pages serv
 | `assets/js/autocomplete.js` | Suggestion dropdown used for countries and places |
 | `assets/js/theme.js` | Light/dark toggle (loaded before CSS) |
 | `assets/js/lib/*.js` | Logic with no DOM, unit tested in `tests/` |
+| `functions/api/link-preview.js` | Pages Function: `GET /api/link-preview?url=` fetches a booking page (allowlisted hosts only, follows share-link redirects, 8 s timeout, cached a day) and returns its name, address, rating, photo via `pagemeta.js`. Not served by `python3 -m http.server`; the app falls back to guessing from the URL |
 
 ### lib
 
@@ -25,7 +26,8 @@ Plain static site: no build step, no backend, no API keys. Cloudflare Pages serv
 | `placeinfo.js` | Place info panel data: OSM tags, Wikipedia summary, public holidays, crowd tips |
 | `discover.js` | Discover tab: Overpass queries, Photon fallback, distance, sort, cache |
 | `ideas.js` | Saved places groups, turning a saved place into a plan |
-| `booking.js` | Pasted booking links (Booking.com, Agoda, Klook, Airbnb…): site name, colour, name and group guessed from the URL (pages can't be fetched: no CORS) |
+| `pagemeta.js` | Reads Open Graph tags and schema.org JSON-LD from raw HTML (used by the function) |
+| `booking.js` | Pasted booking links (Booking.com, Agoda, Klook, Airbnb…): site name, colour, name and group guessed from the URL, `isPreviewHost` allowlist for the function |
 | `guides.js` | Hand-written Good to know guides (visa, do's and don'ts, money, transport, links) |
 | `countryfacts.js` | Plugs, emergency numbers and driving side for every country |
 | `wikivoyage.js` | Wikivoyage sections for countries without a hand-written guide |
@@ -49,7 +51,7 @@ Plain static site: no build step, no backend, no API keys. Cloudflare Pages serv
   items: [{ id, date, time, title, location, category, estimatedCost, actualCost, paid,
             currency?,  // only when different from trip.currency
             notes, link, place?: { osm, lat, lon, kind, area, cc? }, fromIdea?, attachments?: [...] }],
-  ideas: [{ id, title, group, location, link, bookingLink?, notes, place?, createdAt }] }  // a plan made from one gets bookingLink || link
+  ideas: [{ id, title, group, location, link, bookingLink?, details?: { address, area, rating, ratingScale, reviews, stars, image, price }, notes, place?, createdAt }] }  // a plan made from one gets bookingLink || link
 ```
 
 Older trips may lack `countries`, `cities`, a city's `country`, or `paid`. The helpers in `regions.js` and `budget.js` fill those in when reading, so don't assume the fields exist.

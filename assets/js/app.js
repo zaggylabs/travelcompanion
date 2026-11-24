@@ -1326,11 +1326,14 @@ function ideaRow(idea, trip, days, selected) {
         render();
       },
       onkeydown: (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); e.currentTarget.click(); } } },
+      idea.details?.image && h("img", { class: "idea-thumb", src: idea.details.image, alt: "", loading: "lazy", referrerpolicy: "no-referrer", onerror: (e) => e.target.remove() }),
       h("span", { class: "item-main" },
         h("span", { class: "item-title" }, idea.title),
         h("span", { class: "item-meta" },
           idea.location && h("span", null, idea.location),
           idea.notes && h("em", null, idea.notes)),
+        idea.details?.rating && h("span", { class: "idea-rating small" }, "★ ", String(idea.details.rating), idea.details.ratingScale ? `/${idea.details.ratingScale}` : "",
+          idea.details.reviews ? h("span", { class: "muted" }, ` (${idea.details.reviews.toLocaleString("en-GB")} reviews)`) : ""),
         idea.bookingLink && siteChip(idea.bookingLink),
         plans.length > 0 && h("span", { class: "idea-plans" }, plans
           .sort((a, b) => (a.date || "9").localeCompare(b.date || "9") || byTime(a, b))
@@ -1340,6 +1343,29 @@ function ideaRow(idea, trip, days, selected) {
       onclick: () => { Object.assign(ui, { schedulingIdea: scheduling ? null : idea.id, selectedIdea: idea.id, editingIdea: null }); render(); } },
       plans.length ? "Add again" : "Add to itinerary"),
     h("button", { class: "attach-btn", type: "button", "aria-label": `Edit ${idea.title}`, title: "Edit", onclick: edit }, pencilIcon()));
+}
+
+/** What /api/link-preview read from a booking page, or null when it couldn't (or we're on a plain static server). */
+async function linkPreview(url, signal) {
+  try {
+    const res = await fetch(`/api/link-preview?url=${encodeURIComponent(url)}`, { signal });
+    if (!res.ok || !/json/.test(res.headers.get("content-type") ?? "")) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+const looseName = (s) => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\b(hotel|the|by|and|&|resort|hostel)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+
+/** The map place a booking page is about: same name, or the nearest result when the page gave coordinates. */
+async function matchPlace(name, ccs, page, signal) {
+  const results = await searchPlaces(name, ccs, signal);
+  const want = looseName(name);
+  const km = (p) => (page.lat && page.lon && p.lat && p.lon ? Math.hypot(p.lat - page.lat, (p.lon - page.lon) * Math.cos((p.lat * Math.PI) / 180)) * 111 : null);
+  return results.find((p) => km(p) !== null && km(p) < 0.5)
+    ?? results.find((p) => { const n = looseName(p.name); return n && want && (n === want || n.includes(want) || want.includes(n)) && (km(p) === null || km(p) < 5); })
+    ?? null;
 }
 
 /** "Booking.com ↗" pill that opens the saved link. */
@@ -1394,22 +1420,73 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
   let autoLocation = null;
   let picked = null;
 
-  // A booking link (Booking.com, Klook, Airbnb…): shows the site, and fills the name and type when it can tell.
+  // A booking link (Booking.com, Klook, Airbnb…): shows the site, then reads the page (through our
+  // /api/link-preview function) for the name, address, rating and photo, and finds the place on the map.
   const linkInput = h("input", { name: "bookingLink", type: "url", inputmode: "url", placeholder: "Paste a Booking.com, Agoda, Klook or Airbnb link", value: idea.bookingLink || "" });
   const linkHint = h("span", { class: "small muted link-hint", "aria-live": "polite" });
   let autoTitle = null;
-  const readLink = () => {
-    const b = parseBookingLink(linkInput.value);
-    linkHint.replaceChildren();
-    if (!linkInput.value.trim()) return;
-    if (!b) { linkHint.textContent = "That doesn't look like a web link."; return; }
-    const filled = b.name && (!titleInput.value.trim() || titleInput.value === autoTitle);
-    if (filled) titleInput.value = autoTitle = b.name;
-    if (b.group && !groupTouched) groupSelect.value = b.group;
-    linkHint.append(siteChip(b.url), filled ? " Name filled in from the link, so check it's right."
-      : !titleInput.value.trim() ? " Type the place's name above (this link doesn't include it)." : "");
+  let details = idea.details ?? null; // what the booking page says: address, rating, photo…
+  let fetchedFor = idea.details ? idea.bookingLink : null;
+  let linkTimer = null;
+  let linkController = null;
+  const hint = (...parts) => { linkHint.replaceChildren(...parts.filter(Boolean)); };
+  const setTitle = (name) => { titleInput.value = autoTitle = name; };
+  const titleIsOurs = () => !titleInput.value.trim() || titleInput.value === autoTitle;
+
+  const applyPage = async (b, r, signal) => {
+    const name = r.name;
+    if (name && titleIsOurs()) setTitle(name);
+    const where = r.address || r.area;
+    if (where && (!locationInput.value.trim() || locationInput.value === autoLocation)) locationInput.value = autoLocation = where;
+    const g = r.group || b.group;
+    if (g && !groupTouched) groupSelect.value = g;
+    details = { address: r.address, area: r.area, rating: r.rating, ratingScale: r.ratingScale, reviews: r.reviews, stars: r.stars, image: r.image, price: r.price };
+    for (const k in details) if (details[k] === null || details[k] === undefined) delete details[k];
+    const got = [name && "name", where && "address", r.rating && "rating", r.image && "photo"].filter(Boolean);
+    const swap = name && titleInput.value.trim() && titleInput.value !== name
+      ? h("button", { class: "linkish", type: "button", onclick: () => { setTitle(name); readLink(); } }, `Use "${name}"`) : null;
+    hint(siteChip(b.url), got.length ? ` Filled in from the page: ${got.join(", ")}.` : " The page didn't say much, so check the details.", swap && " ", swap);
+    // Find it on the map too, so the info panel and Maps link point at the right place.
+    if (!name) return;
+    const found = await matchPlace(name, ccs, r, signal).catch(() => null);
+    if (signal.aborted) return;
+    picked = found
+      ? { link: mapsLink(found), place: found.osm ? { osm: found.osm, lat: found.lat, lon: found.lon, kind: found.kind, area: found.area, ...(found.countryCode ? { cc: found.countryCode } : {}) } : undefined }
+      : { link: mapsLink({ name, area: r.address || r.area }), place: undefined };
+    if (activeInfo?.isConnected) fillInfo(activeInfo, { ...ideaAsItem(idea), title: titleInput.value, group: groupSelect.value, place: picked.place }, trip, days);
   };
-  linkInput.addEventListener("input", readLink);
+
+  const readLink = (fetchPage = true) => {
+    const b = parseBookingLink(linkInput.value);
+    if (!linkInput.value.trim()) { hint(); details = null; fetchedFor = null; return; }
+    if (!b) { hint("That doesn't look like a web link."); return; }
+    if (b.group && !groupTouched) groupSelect.value = b.group;
+    if (!fetchPage || b.url === fetchedFor) {
+      if (!fetchPage) return;
+      return hint(siteChip(b.url));
+    }
+    // Straight away: a guess from the link itself. Then the page, which knows better.
+    if (b.name && titleIsOurs()) setTitle(b.name);
+    hint(siteChip(b.url), " Reading the page…");
+    clearTimeout(linkTimer);
+    linkController?.abort();
+    const controller = linkController = new AbortController();
+    linkTimer = setTimeout(async () => {
+      const r = await linkPreview(b.url, controller.signal);
+      if (controller.signal.aborted) return;
+      fetchedFor = b.url;
+      if (r?.ok) return applyPage(b, r, controller.signal);
+      // Followed a share link? Its real address may name the place.
+      const real = r?.url ? parseBookingLink(r.url) : null;
+      if (real?.name && titleIsOurs()) setTitle(real.name);
+      hint(siteChip(b.url), titleInput.value.trim()
+        ? ` ${b.site} didn't let us read the page, so the name is a guess from the link. Pick it from the suggestions to fill in the rest.`
+        : ` ${b.site} didn't let us read the page. Type the place's name above and pick it from the suggestions.`);
+    }, 300);
+  };
+  linkInput.addEventListener("input", () => readLink());
+  // An older saved place with a link but no details: read its page when it's opened for editing.
+  if (!isNew && idea.bookingLink && !idea.details) queueMicrotask(() => readLink());
 
   const placeBox = autocomplete(titleInput, {
     delay: 350,
@@ -1436,7 +1513,7 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
 
   // Pasting a link straight into the Place box works too.
   titleInput.addEventListener("input", () => {
-    if (!parseBookingLink(titleInput.value)) { if (linkInput.value.trim()) readLink(); return; }
+    if (!parseBookingLink(titleInput.value)) return;
     linkInput.value = titleInput.value.trim();
     titleInput.value = "";
     placeBox.close();
@@ -1466,6 +1543,7 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
       location: String(f.get("location")).trim(),
       notes: String(f.get("notes")).trim(),
       bookingLink: parseBookingLink(String(f.get("bookingLink") ?? ""))?.url ?? "",
+      details: parseBookingLink(String(f.get("bookingLink") ?? "")) ? details ?? undefined : undefined,
       // A renamed place without a new pick loses the old map link and place match.
       link: picked?.link ?? (same ? idea.link : ""),
       place: picked ? picked.place : same ? idea.place : undefined,
