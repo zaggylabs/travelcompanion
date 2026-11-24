@@ -45,13 +45,16 @@ export async function onRequestGet({ request, waitUntil }) {
 
   let html = await res.text();
   // Some sites (Airbnb) answer with a tiny "Redirecting…" page that uses a meta refresh instead of a 3xx.
-  const refresh = html.length < 20000 && html.match(/<meta[^>]+http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["'][^"']*url\s*=\s*([^"'\s>]+)/i);
+  // Airbnb's is a self-submitting form that sends you to your country's domain (airbnb.co.uk…).
+  const small = html.length < 20000;
+  const refresh = small && (html.match(/<meta[^>]+http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["'][^"']*url\s*=\s*([^"'\s>]+)/i)
+    ?? (/<title>\s*redirecting/i.test(html) && html.match(/<form[^>]+action\s*=\s*["']([^"']+)["']/i)));
   if (refresh) {
     try {
       const next = new URL(refresh[1].replace(/&amp;/g, "&"), url);
       if (isPreviewHost(next.hostname)) {
-        const again = await fetch(next.href, { headers: HEADERS, signal: AbortSignal.timeout(8000) });
-        if (again.ok) { url = again.url || next.href; html = await again.text(); }
+        const again = await fetch(next.href, { headers: HEADERS, redirect: "manual", signal: AbortSignal.timeout(8000) });
+        if (again.ok && /html/i.test(again.headers.get("content-type") ?? "")) { url = next.href; html = await again.text(); }
       }
     } catch { /* keep the first page */ }
   }
