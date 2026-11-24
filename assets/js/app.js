@@ -9,6 +9,7 @@ import { getWikivoyage } from "./lib/wikivoyage.js";
 import { emergencyRows, getFacts, plugAdvice } from "./lib/countryfacts.js";
 import { DIETS, DISCOVER_TYPES, RADII, cachedPlaces, detailedPlaces, discoverType, quickPlaces, formatDistance, getDiet, hasDiets, sortResults } from "./lib/discover.js";
 import { autocomplete } from "./autocomplete.js";
+import { watchPickers } from "./pickers.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
 import { browserGuess, convert, getRates, savedHome, saveHome } from "./lib/rates.js";
@@ -341,6 +342,23 @@ function emptyState(icon, title, text) {
 
 function field(label, control, cls) {
   return h("label", { class: `field ${cls || ""}` }, h("span", null, label), control);
+}
+
+// The trip's days as chips ("Day 2 · Wed 2 Dec") plus Unscheduled. A hidden "date" input holds the pick
+// and fires "change" like a select would.
+function dayPicker(days, value) {
+  const input = h("input", { type: "hidden", name: "date", value: value ?? "" });
+  const chips = [...days.map((d, i) => [d, `Day ${i + 1}`, formatDay(d)]), ["", "Unscheduled", ""]].map(([d, top, sub]) =>
+    h("button", { type: "button", class: `day-chip${d === input.value ? " active" : ""}`, "aria-pressed": String(d === input.value),
+      onclick: (e) => {
+        input.value = d;
+        for (const c of box.querySelectorAll(".day-chip")) { c.classList.toggle("active", c === e.currentTarget); c.setAttribute("aria-pressed", String(c === e.currentTarget)); }
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      } },
+      h("strong", null, top), sub && h("span", null, sub)));
+  const box = h("div", { class: "day-chips", role: "group", "aria-label": "Day" }, chips, input);
+  return box;
 }
 
 // Optional fields start folded behind small "+ Link" chips; one that already has something starts open.
@@ -1701,14 +1719,12 @@ function siteChip(url) {
 function schedulePanel(title, days, onAdd, onCancel, preferDate) {
   const fallback = [preferDate, ui.lastScheduleDate].find((d) => d && days.includes(d)) ?? days[0] ?? "";
   const daySelect = days.length
-    ? h("select", { name: "date", autofocus: true },
-        days.map((d, i) => h("option", { value: d, selected: d === fallback }, `Day ${i + 1} · ${formatDay(d)}`)),
-        h("option", { value: "" }, "Unscheduled"))
+    ? dayPicker(days, fallback)
     : h("input", { name: "date", type: "date", autofocus: true, value: preferDate || ui.lastScheduleDate || "" });
   const form = h("form", { class: "attach-panel card schedule-panel" },
     h("p", { class: "small" }, "Add ", h("strong", null, title), " to your itinerary"),
     h("div", { class: "schedule-row" },
-      field("Day", daySelect),
+      days.length ? h("div", { class: "field" }, h("span", null, "Day"), daySelect) : field("Day", daySelect),
       field("Time (optional)", h("input", { name: "time", type: "time" })),
       h("div", { class: "actions" },
         h("button", { class: "btn primary", type: "submit" }, "Add"),
@@ -2773,11 +2789,9 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     }
     return out;
   };
-  const dayField = (cls) => field("Day", useSelect
-    ? h("select", { name: "date" },
-        h("option", { value: "", selected: item.date === "" }, "Unscheduled"),
-        days.map((d, i) => h("option", { value: d, selected: d === item.date }, `Day ${i + 1} · ${formatDay(d)}`)))
-    : h("input", { name: "date", type: "date", value: item.date }), cls);
+  const dayField = (cls) => (useSelect
+    ? h("div", { class: "field span-all" }, h("span", null, "Day"), dayPicker(days, item.date))
+    : field("Day", h("input", { name: "date", type: "date", value: item.date }), cls));
   const routeRow = (a, b) => h("div", { class: "route-row span-all" }, a, h("span", { class: "route-arrow", "aria-hidden": "true" }, "→"), b);
   const travelFields = isTravel ? [
     // Home is always offered (it's usually where the first flight leaves from), then the trip's countries and cities.
@@ -3157,5 +3171,6 @@ function budgetView(trip, days) {
 }
 
 updateHomeButton();
+watchPickers(root);
 render();
 loadRates();

@@ -812,3 +812,44 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .fold-x { position: absolute; top: -3px; right: 0; padding: 1px 6px; border: 0; border-radius: 999px; background: none; color: var(--subtle); font: inherit; font-size: 0.72rem; font-weight: 600; cursor: pointer; }
 .fold-x:hover { color: var(--bad); background: var(--muted-bg); }
 .guide-btn.active { border-color: var(--accent); background: var(--accent-soft); }
+
+/* Date and time pickers (assets/js/pickers.js) and the plan's day chips */
+.pk-btn { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--fg); font: inherit; font-size: 0.9rem; font-weight: 500; text-align: left; cursor: pointer; min-height: 36px; }
+.pk-btn:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.pk-btn:focus-visible, .pk-btn[aria-expanded="true"] { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+.pk-btn.empty { color: var(--subtle); }
+.pk-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-icon { font-size: 0.95em; flex: none; }
+.pk-backdrop { position: fixed; inset: 0; z-index: 90; }
+.pk-backdrop.dim { background: rgb(0 0 0 / 0.35); }
+.pk-panel { position: fixed; z-index: 91; width: 300px; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 0.18); color: var(--fg); font-size: 0.9rem; }
+.pk-panel.sheet { left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: 85vh; overflow-y: auto; border-radius: 20px 20px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+.pk-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.pk-nav { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--muted-bg); color: var(--fg); font-size: 1.2rem; cursor: pointer; }
+.pk-hint { margin: 0 0 8px; color: var(--subtle); font-size: 0.8rem; }
+.pk-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.pk-week span { text-align: center; font-size: 0.72rem; font-weight: 700; color: var(--subtle); padding: 2px 0 4px; }
+.pk-day { aspect-ratio: 1; min-height: 34px; border: 0; border-radius: 50%; background: none; color: var(--fg); font: inherit; cursor: pointer; }
+.pk-day:hover:not([disabled]) { background: var(--muted-bg); }
+.pk-day[disabled] { color: var(--line); cursor: default; }
+.pk-day.today { box-shadow: inset 0 0 0 1px var(--line); }
+.pk-day.between { background: var(--accent-soft); border-radius: 0; }
+.pk-day.edge, .pk-day.picked { background: var(--accent); color: #fff; font-weight: 700; }
+.pk-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.pk-foot .push { margin-left: auto; }
+.pk-link { border: 0; background: none; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; padding: 6px 4px; }
+.pk-time .pk-now { font-size: 1.4rem; }
+.pk-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.pk-quick .chip { cursor: pointer; }
+.pk-label { margin: 10px 0 4px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--subtle); }
+.pk-hours { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.pk-mins { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.pk-cell { min-height: 34px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--fg); font: inherit; cursor: pointer; }
+.pk-cell:hover { border-color: var(--accent); }
+.pk-cell.picked { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.day-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.day-chip { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 0; padding: 5px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--fg); font: inherit; font-size: 0.82rem; line-height: 1.2; cursor: pointer; }
+.day-chip span { font-size: 0.72rem; font-weight: 500; color: var(--subtle); }
+.day-chip:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.day-chip.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.pk-foot .btn { padding: 6px 16px; }
