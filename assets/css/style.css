@@ -733,3 +733,19 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .skel.w60 { width: 60%; height: 14px; }
 .skel.w40 { width: 40%; }
 @media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+
+/* Popular column on Discover */
+.pop-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.pop-list > li { display: grid; gap: 6px; min-width: 0; }
+.pop-main { display: flex; gap: 10px; align-items: center; width: 100%; padding: 6px; border: 1px solid transparent; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pop-main:hover { background: var(--muted-bg); }
+.pop-list > li.selected .pop-main { border-color: var(--accent); background: var(--accent-soft); }
+.pop-main:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pop-thumb { flex-shrink: 0; width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: var(--muted-bg); display: grid; place-items: center; font-size: 1.2rem; }
+.pop-text { display: grid; min-width: 0; }
+.pop-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pop-text .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pop-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 60px; }
+.pop-actions .btn { padding: 3px 10px; font-size: 0.8rem; white-space: nowrap; }
+.pop-actions .btn.active { border-color: var(--accent); }
+.pop-skel { display: flex !important; gap: 10px; align-items: center; padding: 6px; }

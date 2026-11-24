@@ -652,7 +652,7 @@ function tripView(trip) {
       h("button", { type: "button", "aria-label": "Dismiss", onclick: () => { ui.notice = null; render(); } }, "✕")),
     h("div", { class: "trip-layout" },
       WIDE.matches && h("aside", { class: "trip-info", "aria-label": "About this place" },
-        infoPanel(ui.tab === "ideas" ? ideaAsItem(selectedIdea(trip)) : ui.tab === "discover" ? discoverAsItem(selectedResult(trip), trip) : selectedItem(trip, days), trip, days)),
+        infoPanel(ui.tab === "ideas" ? ideaAsItem(selectedIdea(trip)) : ui.tab === "discover" ? (selectedPopularItem(trip) ?? discoverAsItem(selectedResult(trip), trip)) : selectedItem(trip, days), trip, days)),
       h("div", { class: "trip-main stack" },
         h("div", { class: "tabs", role: "tablist" }, Object.entries(TABS).map(([t, label]) =>
           h("button", { role: "tab", type: "button", "data-tab": t, "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
@@ -660,8 +660,9 @@ function tripView(trip) {
             label, t === "ideas" && trip.ideas?.length ? h("span", { class: "tab-count num" }, trip.ideas.length) : null))),
         ui.tab === "guide" ? guideView(trip) : ui.tab === "budget" ? budgetView(trip, days) : ui.tab === "ideas" ? ideasView(trip, days)
           : ui.tab === "discover" ? discoverView(trip, days) : itineraryView(trip, days)),
-      h("aside", { class: "trip-budget", "aria-label": "Budget" },
-        budgetSummary(trip, days))));
+      ui.tab === "discover"
+        ? h("aside", { class: "trip-budget", "aria-label": "Popular places" }, popularPanel(trip, days))
+        : h("aside", { class: "trip-budget", "aria-label": "Budget" }, budgetSummary(trip, days))));
 }
 
 const TABS = { itinerary: "Itinerary", discover: "Discover", ideas: "Saved places", budget: "Budget", guide: "Good to know" };
@@ -1693,6 +1694,7 @@ function useStop(d, stop) {
   d.near = stop.point; // if the area still needs looking up, look around its city
   d.area = stop.point && stop.exact ? { text: stop.text, name: stop.text, label: stop.text === stop.city ? stop.city : `${stop.text}, ${stop.city}`, lat: stop.point.lat, lon: stop.point.lon } : null;
   d.stop = stop.full;
+  d.city = stop.city ? { name: stop.city, point: basePoint(trip, { city: stop.city }) ?? stop.point } : null;
   if (stop.country) d.country = stop.country;
   if (stop.dates.length) ui.lastScheduleDate = stop.dates[0];
 }
@@ -1791,7 +1793,7 @@ function discoverView(trip, days) {
     search: (q, signal) => searchPlaces(q, ccs, signal, { near: d.near }),
     renderItem: ccs.length > 1 ? (p) => [...settlementRow(p), FLAGS_OK && p.countryCode && h("span", { class: "ac-tag" }, flag(p.countryCode))].filter(Boolean) : settlementRow,
     footer: osmFooter,
-    onPick: (p) => { areaInput.value = p.name; d.areaText = p.name; d.area = areaFrom(p, p.name); d.stop = null; if (p.countryCode) d.country = p.countryCode; },
+    onPick: (p) => { areaInput.value = p.name; d.areaText = p.name; d.area = areaFrom(p, p.name); d.stop = null; d.city = null; if (p.countryCode) d.country = p.countryCode; },
   });
   const keywordInput = h("input", { name: "keyword", value: d.keyword, placeholder: type.placeholder, maxlength: 40 });
   const radiusSelect = h("select", { name: "radius" }, RADII.map((r) => h("option", { value: r, selected: r === d.radius }, formatDistance(r))));
@@ -1923,6 +1925,7 @@ function discoverRow(r, trip, days, d, type, selected) {
       onclick: (e) => {
         if (e.target.closest("a, button")) return;
         d.selected = selected ? null : r.osm;
+        d.popSel = null;
         render();
       },
       onkeydown: (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); e.currentTarget.click(); } } },
@@ -1945,6 +1948,120 @@ function discoverRow(r, trip, days, d, type, selected) {
     h("button", { class: `btn idea-add${scheduling ? " active" : ""}`, type: "button", "aria-expanded": String(scheduling),
       onclick: () => { d.scheduling = scheduling ? null : r.osm; d.selected = r.osm; render(); } },
       plans.length ? "Add again" : "Add to itinerary"));
+}
+
+/* ----- "Popular" column on Discover: famous sights and things to do around the city (Wikidata) ----- */
+
+const popularCache = new Map(); // "35.68,139.77" -> promise of { todo, see }
+
+/** Where the Popular column looks: the day's city, else the searched area. */
+function popularCenter(d) {
+  if (d.city?.point) return { name: d.city.name, lat: d.city.point.lat, lon: d.city.point.lon };
+  if (d.area && Number.isFinite(d.area.lat)) return { name: d.area.name, lat: d.area.lat, lon: d.area.lon };
+  return null;
+}
+
+function getPopular(c) {
+  const key = `${c.lat.toFixed(2)},${c.lon.toFixed(2)}`;
+  if (!popularCache.has(key)) {
+    const p = fetch(`/api/popular?lat=${c.lat.toFixed(2)}&lon=${c.lon.toFixed(2)}`, { signal: AbortSignal.timeout(25000) })
+      .then((r) => r.json())
+      .then((data) => { if (!data?.ok) throw new Error(data?.error ?? "failed"); return data; });
+    p.catch(() => popularCache.delete(key)); // try again next time
+    popularCache.set(key, track(p));
+  }
+  return popularCache.get(key);
+}
+
+const popularGroup = (kind) => (kind === "do" ? "Activities" : "Sights");
+
+function popularAsItem(p, kind, trip, d) {
+  const c = popularCenter(d);
+  return {
+    id: `pop:${p.id}`, title: p.name, location: c?.name ?? "", group: popularGroup(kind), category: "Activities", date: "", time: "",
+    link: mapsLink({ name: p.name, area: c?.name, country: getCountry(d.country || tripCountries(trip)[0])?.name }),
+    place: { lat: p.lat, lon: p.lon, kind: p.desc, area: c?.name ?? "", ...(d.country ? { cc: d.country } : {}) },
+    cc: d.country, nearby: `Popular ${d.city?.point ? "in" : "around"} ${c?.name ?? "this area"}`,
+  };
+}
+
+/** The popular place picked for the info panel, as a plan-shaped item, or null. */
+function selectedPopularItem(trip) {
+  const d = discoverState(trip);
+  if (!d.popSel) return null;
+  const c = popularCenter(d);
+  const data = c && settled.get(getPopular(c))?.value;
+  for (const kind of ["do", "see"]) {
+    const p = data?.[kind === "do" ? "todo" : "see"]?.find((x) => x.id === d.popSel);
+    if (p) return popularAsItem(p, kind, trip, d);
+  }
+  return null;
+}
+
+function popularPanel(trip, days) {
+  const d = discoverState(trip);
+  const c = popularCenter(d);
+  const box = h("div", { class: "card summary popular" });
+  if (!c) {
+    box.append(h("div", { class: "summary-body" }, h("h2", null, "Popular"),
+      h("p", { class: "small muted" }, "Search an area, or pick one of your days, to see the best-known sights and things to do there.")));
+    return box;
+  }
+  const p = getPopular(c);
+  const draw = () => {
+    if (!box.isConnected && box.dataset.drawn) return;
+    box.dataset.drawn = "1";
+    const st = settled.get(p);
+    box.replaceChildren(h("div", { class: "summary-body" },
+      h("h2", null, d.city?.point ? `Popular in ${c.name}` : `Popular around ${c.name}`),
+      !st && h("ul", { class: "pop-list", "aria-busy": "true" }, [0, 1, 2, 3, 4].map(() => h("li", { class: "pop-skel" }, h("span", { class: "skel pop-thumb" }), h("span", { class: "skel w60" })))),
+      st?.error && h("p", { class: "small muted" }, "Couldn't load popular places right now. ",
+        h("button", { class: "linkish", type: "button", onclick: () => render() }, "Try again")),
+      st?.value && [
+        popularSection("Top things to do", "do", st.value.todo, trip, days, d),
+        popularSection("Must-see places", "see", st.value.see, trip, days, d),
+        !st.value.todo.length && !st.value.see.length && h("p", { class: "small muted" }, `We couldn't find well-known places around ${c.name}.`),
+        h("p", { class: "small muted" }, "Ranked by how many Wikipedia languages write about each place, from ",
+          h("a", { href: "https://www.wikidata.org/", target: "_blank", rel: "noopener" }, "Wikidata"), "."),
+      ]));
+  };
+  draw();
+  if (!settled.has(p)) p.then(draw, draw);
+  return box;
+}
+
+function popularSection(title, kind, list, trip, days, d) {
+  if (!list?.length) return null;
+  return h("section", { class: "summary-sec" },
+    h("h3", null, title),
+    h("ul", { class: "pop-list" }, list.map((p) => {
+      const item = popularAsItem(p, kind, trip, d);
+      const saved = (trip.ideas ?? []).some((i) => sameName(i.title, p.name));
+      const plans = trip.items.filter((i) => sameName(i.title, p.name));
+      const selected = d.popSel === p.id;
+      const scheduling = d.popSched === p.id;
+      return h("li", { class: selected ? "selected" : "" },
+        h("button", { class: "pop-main", type: "button", "aria-pressed": String(selected), title: "Show info about this place",
+          onclick: () => { d.popSel = selected ? null : p.id; d.selected = null; render(); } },
+          p.image ? h("img", { class: "pop-thumb", src: p.image, alt: "", loading: "lazy", referrerpolicy: "no-referrer" }) : h("span", { class: "pop-thumb", "aria-hidden": "true" }, kind === "do" ? "🎢" : "📍"),
+          h("span", { class: "pop-text" }, h("strong", null, p.name), h("span", { class: "small muted" }, p.desc))),
+        h("span", { class: "pop-actions" },
+          h("button", { class: `btn small disc-save${saved ? " done" : ""}`, type: "button", disabled: saved, onclick: () => {
+            updateIdeas(trip.id, (l) => [...l, { ...emptyIdea(item.group), title: p.name, location: item.location, link: item.link, place: item.place }]);
+            render();
+          } }, saved ? "✓ Saved" : "Save"),
+          h("button", { class: `btn small${scheduling ? " active" : ""}`, type: "button", "aria-expanded": String(scheduling),
+            onclick: () => { d.popSched = scheduling ? null : p.id; render(); } }, plans.length ? "Add again" : "Add to a day"),
+          plans.length > 0 && h("button", { class: "idea-plan", type: "button", title: "Show it in the itinerary", onclick: () => goToPlan(plans[0].id) }, "✓ ", dayLabel(plans[0].date, days))),
+        scheduling && schedulePanel(p.name, days, (date, time) => {
+          const current = loadTrips().find((t) => t.id === trip.id);
+          if (!current) return;
+          const plan = { ...emptyItem(date), time, title: p.name, location: item.location, category: "Activities", link: item.link, place: item.place };
+          saveTrip({ ...current, items: [...current.items, withCurrency(plan, planCurrency(current, d.country), current)] });
+          d.popSched = null;
+        }, () => { d.popSched = null; }),
+        !WIDE.matches && selected && h("div", { class: "info-inline" }, infoPanel(item, trip, days)));
+    })));
 }
 
 /* ----- attachments ----- */
