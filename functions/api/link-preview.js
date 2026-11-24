@@ -43,8 +43,10 @@ export async function onRequestGet({ request, waitUntil }) {
   if (!res.ok) return json({ ok: false, error: `status-${res.status}`, url });
   if (!/html/i.test(res.headers.get("content-type") ?? "")) return json({ ok: false, error: "not-html", url });
 
-  const meta = parsePageMeta(await res.text(), url);
-  if (meta.blocked && !meta.name) return json({ ok: false, error: "blocked", url });
+  const html = await res.text();
+  const meta = parsePageMeta(html, url);
+  // Say what came back, so a blocked site is easy to tell apart from a page we can't parse.
+  if (meta.blocked && !meta.name) return json({ ok: false, error: "blocked", url, status: res.status, bytes: html.length, title: (html.match(/<title[^>]*>([\s\S]{0,120})/i)?.[1] ?? "").trim() });
   const out = json({ ok: true, url, ...meta }, DAY);
   waitUntil(cache.put(key, out.clone()));
   return out;
