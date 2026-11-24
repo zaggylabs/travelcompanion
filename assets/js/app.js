@@ -14,6 +14,7 @@ import { formatMoney } from "./lib/money.js";
 import { browserGuess, convert, getRates, savedHome, saveHome } from "./lib/rates.js";
 import { expectedCost, isPaid, itemCurrency, setPaid, summarizeBudget } from "./lib/budget.js";
 import { csvToItems, itemsToCsv } from "./lib/csv.js";
+import { parseBookingLink } from "./lib/booking.js";
 import { IDEA_GROUPS, emptyIdea, groupForPlace, groupIdeas, groupOf, ideaToItem } from "./lib/ideas.js";
 import { deleteTrip, loadTrips, saveTrip, STORAGE_KEY } from "./lib/store.js";
 import {
@@ -1291,7 +1292,7 @@ function ideasView(trip, days) {
     h("div", { class: "card pad stack ideas-add" },
       h("div", null,
         h("h2", null, "Saved places"),
-        h("p", { class: "small muted" }, "Jot down places you might go: somewhere to eat, a sight, an activity. When you know when, press ",
+        h("p", { class: "small muted" }, "Jot down places you might go: somewhere to eat, a sight, an activity. You can also paste a Booking.com, Agoda, Klook or Airbnb link. When you know when, press ",
           h("strong", null, "Add to itinerary"), " and pick the day and time.")),
       adding && ideaForm(emptyIdea(ui.lastIdeaGroup || "Food"), trip, days, addNew, null, null, focus)),
     groups.length === 0
@@ -1330,6 +1331,7 @@ function ideaRow(idea, trip, days, selected) {
         h("span", { class: "item-meta" },
           idea.location && h("span", null, idea.location),
           idea.notes && h("em", null, idea.notes)),
+        idea.bookingLink && siteChip(idea.bookingLink),
         plans.length > 0 && h("span", { class: "idea-plans" }, plans
           .sort((a, b) => (a.date || "9").localeCompare(b.date || "9") || byTime(a, b))
           .map((p) => h("button", { class: "idea-plan", type: "button", title: "Show it in the itinerary", onclick: () => goToPlan(p.id) },
@@ -1338,6 +1340,14 @@ function ideaRow(idea, trip, days, selected) {
       onclick: () => { Object.assign(ui, { schedulingIdea: scheduling ? null : idea.id, selectedIdea: idea.id, editingIdea: null }); render(); } },
       plans.length ? "Add again" : "Add to itinerary"),
     h("button", { class: "attach-btn", type: "button", "aria-label": `Edit ${idea.title}`, title: "Edit", onclick: edit }, pencilIcon()));
+}
+
+/** "Booking.com ↗" pill that opens the saved link. */
+function siteChip(url) {
+  const b = parseBookingLink(url);
+  if (!b) return null;
+  return h("a", { class: "site-chip", href: b.url, target: "_blank", rel: "noopener noreferrer", title: b.url },
+    h("i", { style: b.color ? `background:${b.color}` : null }, b.site[0].toUpperCase()), b.site, " ↗");
 }
 
 /** "Add <title> to your itinerary" with a day and an optional time. `onAdd(date, time)` saves it. */
@@ -1384,6 +1394,23 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
   let autoLocation = null;
   let picked = null;
 
+  // A booking link (Booking.com, Klook, Airbnb…): shows the site, and fills the name and type when it can tell.
+  const linkInput = h("input", { name: "bookingLink", type: "url", inputmode: "url", placeholder: "Paste a Booking.com, Agoda, Klook or Airbnb link", value: idea.bookingLink || "" });
+  const linkHint = h("span", { class: "small muted link-hint", "aria-live": "polite" });
+  let autoTitle = null;
+  const readLink = () => {
+    const b = parseBookingLink(linkInput.value);
+    linkHint.replaceChildren();
+    if (!linkInput.value.trim()) return;
+    if (!b) { linkHint.textContent = "That doesn't look like a web link."; return; }
+    const filled = b.name && (!titleInput.value.trim() || titleInput.value === autoTitle);
+    if (filled) titleInput.value = autoTitle = b.name;
+    if (b.group && !groupTouched) groupSelect.value = b.group;
+    linkHint.append(siteChip(b.url), filled ? " Name filled in from the link, so check it's right."
+      : !titleInput.value.trim() ? " Type the place's name above (this link doesn't include it)." : "");
+  };
+  linkInput.addEventListener("input", readLink);
+
   const placeBox = autocomplete(titleInput, {
     delay: 350,
     search: (q, signal) => searchPlaces(q, ccs, signal),
@@ -1407,11 +1434,21 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
     },
   });
 
+  // Pasting a link straight into the Place box works too.
+  titleInput.addEventListener("input", () => {
+    if (!parseBookingLink(titleInput.value)) { if (linkInput.value.trim()) readLink(); return; }
+    linkInput.value = titleInput.value.trim();
+    titleInput.value = "";
+    placeBox.close();
+    readLink();
+    if (!titleInput.value) titleInput.focus();
+  });
   const form = h("form", { class: `form-grid six${isNew ? "" : " card pad editing"}` },
     field("Place", placeBox.el, "span-4"),
     field("Type", groupSelect, "span-2"),
     field("Where", locationInput, "span-3"),
     field("Note", h("input", { name: "notes", placeholder: "Optional, e.g. try the tonkotsu", value: idea.notes }), "span-3"),
+    h("label", { class: "field span-all" }, h("span", null, "Booking link (optional)"), linkInput, linkHint),
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, isNew ? "Save place" : "Save"),
       onCancel && h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
@@ -1428,6 +1465,7 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
       group: String(f.get("group")),
       location: String(f.get("location")).trim(),
       notes: String(f.get("notes")).trim(),
+      bookingLink: parseBookingLink(String(f.get("bookingLink") ?? ""))?.url ?? "",
       // A renamed place without a new pick loses the old map link and place match.
       link: picked?.link ?? (same ? idea.link : ""),
       place: picked ? picked.place : same ? idea.place : undefined,

@@ -25,6 +25,7 @@ Plain static site: no build step, no backend, no API keys. Cloudflare Pages serv
 | `placeinfo.js` | Place info panel data: OSM tags, Wikipedia summary, public holidays, crowd tips |
 | `discover.js` | Discover tab: Overpass queries, Photon fallback, distance, sort, cache |
 | `ideas.js` | Saved places groups, turning a saved place into a plan |
+| `booking.js` | Pasted booking links (Booking.com, Agoda, Klook, Airbnb…): site name, colour, name and group guessed from the URL (pages can't be fetched: no CORS) |
 | `guides.js` | Hand-written Good to know guides (visa, do's and don'ts, money, transport, links) |
 | `countryfacts.js` | Plugs, emergency numbers and driving side for every country |
 | `wikivoyage.js` | Wikivoyage sections for countries without a hand-written guide |
@@ -48,7 +49,7 @@ Plain static site: no build step, no backend, no API keys. Cloudflare Pages serv
   items: [{ id, date, time, title, location, category, estimatedCost, actualCost, paid,
             currency?,  // only when different from trip.currency
             notes, link, place?: { osm, lat, lon, kind, area, cc? }, fromIdea?, attachments?: [...] }],
-  ideas: [{ id, title, group, location, link, notes, place?, createdAt }] }
+  ideas: [{ id, title, group, location, link, bookingLink?, notes, place?, createdAt }] }  // a plan made from one gets bookingLink || link
 ```
 
 Older trips may lack `countries`, `cities`, a city's `country`, or `paid`. The helpers in `regions.js` and `budget.js` fill those in when reading, so don't assume the fields exist.

@@ -30,7 +30,7 @@ export function groupForPlace(p) {
 }
 
 export function emptyIdea(group = "Food") {
-  return { id: newId(), title: "", group, location: "", link: "", notes: "", place: undefined, createdAt: new Date().toISOString() };
+  return { id: newId(), title: "", group, location: "", link: "", bookingLink: "", notes: "", place: undefined, createdAt: new Date().toISOString() };
 }
 
 /** A new itinerary plan made from a saved place. */
@@ -45,7 +45,7 @@ export function ideaToItem(idea, date, time) {
     estimatedCost: 0,
     actualCost: null,
     notes: idea.notes || "",
-    link: idea.link || "",
+    link: idea.bookingLink || idea.link || "", // the booking page is more useful on a plan than a map search
     ...(idea.place ? { place: idea.place } : {}),
     fromIdea: idea.id,
   };

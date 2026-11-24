@@ -542,3 +542,11 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
   .disc-days-row { flex-direction: column; gap: 4px; }
   .disc-days-country { flex: none; }
 }
+/* Booking links on saved places */
+.site-chip { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; padding: 1px 8px 1px 2px; border: 1px solid var(--line); border-radius: 99px; color: var(--fg); font-size: 0.75rem; font-weight: 600; text-decoration: none; max-width: 100%; }
+.site-chip:hover { border-color: var(--accent); }
+.site-chip i { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: var(--subtle); color: #fff; font-style: normal; font-size: 0.65rem; }
+.item-main > .site-chip { align-self: flex-start; }
+.link-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
+.link-hint:empty { display: none; }
+.link-hint .site-chip { margin-top: 0; }

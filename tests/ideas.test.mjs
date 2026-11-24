@@ -25,6 +25,7 @@ test("adding a saved place makes a plan with its details", () => {
   assert.notEqual(item.id, idea.id);
   assert.equal(ideaToItem({ ...idea, group: "Stays" }, "", "").category, "Lodging");
   assert.equal(groupOf("nonsense").key, "Other");
+  assert.equal(ideaToItem({ ...idea, bookingLink: "https://www.booking.com/hotel/jp/x.html" }, "", "").link, "https://www.booking.com/hotel/jp/x.html");
 });
 
 test("groups keep their order and put added places last", () => {
