@@ -749,3 +749,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .pop-actions .btn { padding: 3px 10px; font-size: 0.8rem; white-space: nowrap; }
 .pop-actions .btn.active { border-color: var(--accent); }
 .pop-skel { display: flex !important; gap: 10px; align-items: center; padding: 6px; }
+
+/* Attachments inside the plan form */
+.form-files .actions { flex-wrap: wrap; align-items: center; }
+.form-files .actions .btn { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.form-files .actions .btn svg { width: 16px; height: 16px; }
+.form-files.drop { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }

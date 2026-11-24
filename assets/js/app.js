@@ -2213,6 +2213,41 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
 
   // The cost's currency: the plan's own, or for a new plan on a multi-country trip, the day's country's.
   const isNew = !trip.items.some((i) => i.id === item.id);
+
+  // Attachments: new files wait in memory and removals wait until Save; Cancel drops both.
+  const pending = [...(item.pendingFiles ?? [])];
+  const removing = new Set(item.removingFiles ?? []);
+  const filesBox = h("div", { class: "field span-all form-files" });
+  const fileInput = h("input", { type: "file", accept: ACCEPT, multiple: true, hidden: true, "aria-label": "Files to attach" });
+  let fileError = "";
+  const addFiles = (list) => {
+    const all = [...list];
+    const bad = all.filter((f) => !isAllowedType(f) || f.size > MAX_FILE_BYTES);
+    pending.push(...all.filter((f) => !bad.includes(f)));
+    fileError = bad.length ? `Only images and PDFs under ${formatSize(MAX_FILE_BYTES)} can be attached (skipped ${bad.map((f) => f.name).join(", ")}).` : "";
+    drawFiles();
+  };
+  fileInput.addEventListener("change", () => { if (fileInput.files?.length) addFiles(fileInput.files); fileInput.value = ""; });
+  function drawFiles() {
+    const saved = item.attachments ?? [];
+    const row = (name, size, note, button) => h("li", { class: "file" }, h("span", { class: "file-main" }, h("span", { class: "file-name" }, name), h("span", { class: "small muted" }, [formatSize(size), note].filter(Boolean).join(" · "))), button);
+    filesBox.replaceChildren(
+      h("span", null, "Attachments"),
+      (saved.length || pending.length) ? h("ul", { class: "files" },
+        saved.map((f) => removing.has(f.id)
+          ? row(h("s", null, f.name), f.size, "removed when you save", h("button", { class: "btn ghost", type: "button", onclick: () => { removing.delete(f.id); drawFiles(); } }, "Undo"))
+          : row(f.name, f.size, "", h("button", { class: "btn ghost", type: "button", "aria-label": `Remove ${f.name}`, onclick: () => { removing.add(f.id); drawFiles(); } }, "Remove"))),
+        pending.map((f) => row(f.name, f.size, "added when you save", h("button", { class: "btn ghost", type: "button", "aria-label": `Remove ${f.name}`, onclick: () => { pending.splice(pending.indexOf(f), 1); drawFiles(); } }, "Remove")))) : null,
+      fileError && h("p", { class: "error" }, fileError),
+      h("div", { class: "actions" },
+        h("button", { class: "btn", type: "button", onclick: () => fileInput.click() }, clipIcon(), "Attach file"),
+        h("span", { class: "small muted" }, "Tickets, bookings or screenshots (images or PDFs). Saved in this browser only."),
+        fileInput));
+  }
+  drawFiles();
+  filesBox.addEventListener("dragover", (e) => { e.preventDefault(); filesBox.classList.add("drop"); });
+  filesBox.addEventListener("dragleave", () => filesBox.classList.remove("drop"));
+  filesBox.addEventListener("drop", (e) => { e.preventDefault(); filesBox.classList.remove("drop"); if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files); });
   // Travel is usually booked (and paid) from home, so it starts in the home currency.
   const startCur = isNew && !item.currency ? (isTravel ? home.currency : planCurrency(trip, country?.code)) : itemCurrency(item, trip);
   const curOptions = [...new Set([startCur, trip.currency, ...ccs.map(currencyForCountry), home.currency, ...ALL_CURRENCIES].filter(Boolean))];
@@ -2358,6 +2393,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       link: String(f.get("link") ?? "").trim(),
       notes: String(f.get("notes") ?? ""),
       ...(currencyTouched && !isTravel ? { currency: currencySelect.value } : {}),
+      pendingFiles: pending, removingFiles: [...removing],
       ...(travel ? { travel: {
         mode: category === "Flights" ? "flight" : groundMode,
         from: String(f.get("from") ?? "").trim(), to: String(f.get("to") ?? "").trim(), number: String(f.get("number") ?? "").trim(),
@@ -2384,6 +2420,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     field("Currency", currencySelect, "span-1"),
     field("Link", linkInput, "span-all"),
     field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"),
+    filesBox,
     h("label", { class: "check span-all" }, paidBox, h("span", null, "Paid"), h("span", { class: "small muted" }, " · ticks it off the to-pay list on the right")),
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, "Save"),
@@ -2406,8 +2443,9 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     const exists = current.items.some((i) => i.id === item.id);
     activeSummary.update({ ...current, items: exists ? current.items.map((i) => (i.id === item.id ? draft : i)) : [...current.items, draft] }, true);
   });
-  form.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (form.dataset.saving) return;
     const f = new FormData(form);
     // A Flights or Transport plan is a journey once it has a route or a number; a taxi fare needn't be.
     const filled = isTravel ? {
@@ -2422,9 +2460,28 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       : placeText && placeText === startPlace ? item.place : placeText ? { name: placeText } : undefined;
     const title = String(f.get("title")).trim() || placeText || (travel ? travelTitle(travel) : "");
     if (!title) { titleInput.focus(); return; }
-    const { travel: _old, place: _p, ...base } = withCurrency(item, String(f.get("currency")), trip);
+    // Store new files and drop removed ones before saving the plan.
+    let attachments = (item.attachments ?? []).filter((a) => !removing.has(a.id));
+    if (pending.length || removing.size) {
+      form.dataset.saving = "1";
+      const saveBtn = form.querySelector("button[type=submit]");
+      if (saveBtn) saveBtn.textContent = "Saving…";
+      if (pending.length) requestPersistence();
+      try {
+        for (const file of pending) attachments.push(await putFile({ id: newId(), tripId: trip.id, itemId: item.id, file }));
+      } catch {
+        delete form.dataset.saving;
+        if (saveBtn) saveBtn.textContent = "Save";
+        fileError = "Couldn't save the files in this browser (private browsing or full storage can block it). Remove them to save the plan.";
+        drawFiles();
+        return;
+      }
+      for (const id of removing) await deleteFile(id).catch(() => {});
+    }
+    const { travel: _old, place: _p, pendingFiles: _pf, removingFiles: _rf, attachments: _a, ...base } = withCurrency(item, String(f.get("currency")), trip);
     onSave({
       ...base,
+      ...(attachments.length ? { attachments } : {}),
       title,
       ...(place ? { place } : {}),
       category: String(f.get("category")),
