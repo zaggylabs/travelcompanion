@@ -16,7 +16,7 @@ export const GUIDES = {
       byHome: { SG: "Singapore passport: visa-free for tourist stays of up to 90 days." },
       steps: [
         { text: "Optional but faster: fill in your immigration and customs details on Visit Japan Web before you fly, and show the QR codes on arrival.", link: L("Visit Japan Web", "https://www.vjw.digital.go.jp/") },
-        { text: "Some common cold and allergy medicines (for example ones with pseudoephedrine) are not allowed into Japan. Check before you pack medicines.", link: L("Bringing medicines into Japan (MHLW)", "https://www.mhlw.go.jp/english/policy/health-medical/pharmaceuticals/01.html") },
+        { text: "Some common cold and allergy medicines (for example ones with pseudoephedrine) are not allowed into Japan. Check before you pack medicines.", link: L("Bringing medicines into Japan (MHLW)", "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/kenkou_iryou/iyakuhin/kojinyunyu/topics/tp010401-1_00001.html") },
         { text: "Japan's departure tax is ¥3,000 per person from 1 July 2026. It's usually already in your flight price." },
       ],
       links: [L("Visa exemption list (Ministry of Foreign Affairs)", "https://www.mofa.go.jp/j_info/visit/visa/short/novisa.html")],
@@ -423,7 +423,7 @@ const schengenVisa = (name, links, steps = []) => ({
     { text: "ETIAS, a new online travel authorisation for visa-free visitors, is planned but wasn't required yet when we checked. Only use the official EU site if it starts.", link: L("Travel to Europe (official EU site)", "https://travel-europe.europa.eu/") },
     ...steps,
   ],
-  links: [...links, L("EU visa policy: who needs a visa", "https://home-affairs.ec.europa.eu/policies/schengen-borders-and-visa/visa-policy_en")],
+  links,
   schengen: true,
 });
 
@@ -484,7 +484,7 @@ Object.assign(GUIDES, {
   },
 
   IT: {
-    visa: schengenVisa("Italy", [L("Visa for Italy (Ministry of Foreign Affairs)", "https://vistoperitalia.esteri.it/home/en")],
+    visa: schengenVisa("Italy", [L("Visa for Italy (Ministry of Foreign Affairs)", "https://vistoperitalia.esteri.it/")],
       [{ text: "Visiting Venice for the day? On peak days there's an access fee; check if your date needs one.", link: L("Venice access fee (City of Venice)", "https://cda.ve.it/en/") }]),
     dos: [
       "Cover shoulders and knees in churches, including St Peter's and the Vatican Museums.",
@@ -681,7 +681,7 @@ Object.assign(GUIDES, {
       general: "Most visitors need a visa for India. Many nationalities can apply online for an e-Visa.",
       byHome: { SG: "Singapore passport: you need a visa. Apply for an e-Visa (e-Tourist Visa) online before you travel." },
       steps: [{ text: "Apply for the e-Visa only on the official government site; many lookalike sites charge more.", link: L("Indian e-Visa (official)", "https://indianvisaonline.gov.in/evisa/") }],
-      links: [L("Bureau of Immigration, India", "https://boi.gov.in/")],
+      links: [L("Bureau of Immigration, India", "https://boi.mha.gov.in/boi/")],
     },
     dos: [
       "Dress modestly, and take your shoes off at temples and homes.",
