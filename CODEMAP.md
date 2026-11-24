@@ -46,7 +46,7 @@ Plain static site: no build step, no API keys. The only server code is one Cloud
   country,            // first country, kept for older code paths
   countries: ["ES","CH"],
   cities: [{ name, country, lat?, lon? }], destination: "Barcelona & Zurich",
-  dayBases: { "2026-12-10": { city, area?, lat?, lon? } },  // a day's own 📍 wins; else a travel plan arriving in a trip city that day; else carries on from the last of those
+  dayBases: { "2026-12-10": { city, area?, lat?, lon? } },  // a day's own 📍 wins; else a travel plan arriving in a trip city (or a trip country → its first city) that day; else carries on from the last of those
   currency,           // "Totals in": totals and budget limits are in this
   budget: { Food: 300, ... },
   items: [{ id, date, time, title, location, category, estimatedCost, actualCost, paid,

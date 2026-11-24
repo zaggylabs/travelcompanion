@@ -1074,9 +1074,7 @@ function itineraryView(trip, days) {
                !WIDE.matches && selected?.id === item.id && ui.selectedItem === item.id && h("div", { class: "info-inline" }, infoPanel(item, trip, days))])),
           h("li", null, e?.mode === "new" && e.date === g.key
             ? itemForm(emptyItem(g.key, e.travel), trip, days, saveItem, cancel)
-            : h("div", { class: "add-row" },
-                h("button", { class: "btn ghost", type: "button", onclick: () => { ui.editingItem = { mode: "new", date: g.key }; ui.attachOpen = null; render(); } }, "+ Add plan"),
-                h("button", { class: "btn ghost", type: "button", title: "A flight, train, bus or ferry", onclick: () => { ui.editingItem = { mode: "new", date: g.key, travel: true }; ui.attachOpen = null; render(); } }, "✈ Add travel")))));
+            : h("button", { class: "btn ghost", type: "button", onclick: () => { ui.editingItem = { mode: "new", date: g.key }; ui.attachOpen = null; render(); } }, "+ Add plan"))));
     }));
 }
 
@@ -2110,17 +2108,47 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   const modeSelect = h("select", { name: "mode" }, TRAVEL_MODES.map((m) => h("option", { value: m.key, selected: m.key === (t.mode || "flight") }, `${m.icon} ${m.label}`)));
   modeSelect.addEventListener("change", () => { if (!categoryTouched) categorySelect.value = travelMode(modeSelect.value).category; });
   const travelFields = isTravel ? [
-    h("datalist", { id: placesList }, [...new Set([homeName, ...tripCities(trip).map((c) => c.name)].filter(Boolean))].map((n) => h("option", { value: n }))),
+    // Home is always offered (it's usually where the first flight leaves from), then the trip's countries and cities.
+    h("datalist", { id: placesList }, [...new Set([homeName, ...ccs.map((c) => getCountry(c)?.name), ...tripCities(trip).map((c) => c.name)].filter(Boolean))].map((n) => h("option", { value: n }))),
     field("Type", modeSelect, "span-2"),
     field("From", h("input", { name: "from", list: placesList, value: t.from ?? "", placeholder: homeName ? `e.g. ${homeName}` : "e.g. Singapore" }), "span-2"),
-    field("To", h("input", { name: "to", list: placesList, value: t.to ?? "", placeholder: "e.g. Tokyo" }), "span-2"),
+    field("To", h("input", { name: "to", list: placesList, value: t.to ?? "", placeholder: "A country or city, e.g. Japan" }), "span-2"),
     field("Flight or train no.", h("input", { name: "number", value: t.number ?? "", placeholder: "Optional" }), "span-2"),
     field("Departs", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
     field("Arrives", h("input", { name: "arrive", type: "time", value: t.arrive ?? "" }), "span-1"),
     h("label", { class: "check span-all next-day" }, h("input", { type: "checkbox", name: "nextDay", checked: Boolean(t.nextDay) }), h("span", null, "Arrives the next day")),
   ] : [];
 
+  // Plan or Travel: switching redraws the form in the other layout, keeping what's been typed.
+  const switchKind = (travel) => {
+    if (travel === isTravel) return;
+    const f = new FormData(form);
+    const actualRaw = String(f.get("actualCost") ?? "").trim();
+    const { travel: _t, currency: _c, ...rest } = item;
+    const draft = {
+      ...rest,
+      title: String(f.get("title") ?? "").trim(),
+      date: String(f.get("date") ?? ""),
+      time: String(f.get("time") ?? ""),
+      category: travel ? "Flights" : "Activities",
+      estimatedCost: Number(f.get("estimatedCost")) || 0,
+      actualCost: actualRaw === "" || Number.isNaN(Number(actualRaw)) ? null : Number(actualRaw),
+      paid: paidBox.checked,
+      link: String(f.get("link") ?? "").trim(),
+      notes: String(f.get("notes") ?? ""),
+      ...(currencyTouched && !isTravel ? { currency: currencySelect.value } : {}),
+      ...(travel ? { travel: { mode: "flight", from: "", to: "", number: "", arrive: "", nextDay: false } } : {}),
+    };
+    const next = itemForm(draft, trip, days, onSave, onCancel, onDelete);
+    form.replaceWith(next);
+    next.querySelector(travel ? "input[name=from]" : "input[name=title]")?.focus();
+  };
+  const kindSwitch = h("div", { class: "kind-switch span-all", role: "group", "aria-label": "Kind of plan" },
+    h("button", { type: "button", class: `chip small${isTravel ? "" : " active"}`, "aria-pressed": String(!isTravel), onclick: () => switchKind(false) }, "📍 Plan"),
+    h("button", { type: "button", class: `chip small${isTravel ? " active" : ""}`, "aria-pressed": String(isTravel), onclick: () => switchKind(true) }, "✈ Travel (flight, train, bus…)"));
+
   const form = h("form", { class: "card pad form-grid six editing" },
+    kindSwitch,
     field(isTravel ? "Name" : "What", placeBox.el, "span-4"),
     field("Category", categorySelect, "span-2"),
     field("Day", useSelect

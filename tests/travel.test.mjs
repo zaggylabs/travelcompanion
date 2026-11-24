@@ -32,3 +32,8 @@ test("a travel plan's arrival city becomes the day's base until a later 📍", (
   assert.equal(dayCountry(trip, days[2], days), "KR");
   assert.equal(dayBase(trip, days[3], days).city, "Tokyo", "a 📍 you set wins");
 });
+
+test("landing in a country puts you in its first city on the trip", () => {
+  const trip = { countries: ["JP"], cities: [{ name: "Osaka", country: "JP" }, { name: "Tokyo", country: "JP" }], dayBases: {}, items: [fly(days[0], "Singapore", "Japan")] };
+  assert.equal(dayBase(trip, days[1], days).city, "Osaka");
+});

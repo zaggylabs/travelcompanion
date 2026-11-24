@@ -3,6 +3,7 @@
 // one-tap choices instead of a blank box; anything else is searched on Photon.
 
 import { arrivals } from "./travel.js";
+import { findCountry } from "./countries.js";
 
 // Popular cities per country, roughly in order of how often people visit them.
 const CITIES = {
@@ -124,7 +125,9 @@ export function dayBase(trip, date, days) {
   const own = bases[date];
   if (own?.city) return { ...own, set: true };
   const cities = tripCities(trip);
-  const cityAt = (name) => cities.find((c) => norm(c.name) === norm(name));
+  // A travel plan can land in a city, or in a country ("Japan"): then you're in its first city on the trip.
+  const cityAt = (name) => cities.find((c) => norm(c.name) === norm(name))
+    ?? (findCountry(name) && cities.find((c) => (c.country || tripCountries(trip)[0]) === findCountry(name).code));
   // A flight or train that lands in one of the trip's cities moves you there, until a later 📍 says otherwise.
   const landed = arrivals(trip?.items, (name) => Boolean(cityAt(name)));
   const arrive = (name, extra) => {
