@@ -2,6 +2,8 @@ import { CATEGORIES, newId } from "./lib/constants.js";
 import { ALL_CURRENCIES, findCountry, flag, getCountry, searchCountries } from "./lib/countries.js";
 import { mapsLink, searchPlaces } from "./lib/places.js";
 import { crowdTip, dayNote, getHolidays, getPlaceInfo } from "./lib/placeinfo.js";
+import { GUIDES_CHECKED, SCHENGEN_NOTE, getGuide, homeAdviceLink, isSchengen, visaFor, visaOverviewLink, wikivoyageUrl } from "./lib/guides.js";
+import { getWikivoyage } from "./lib/wikivoyage.js";
 import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
@@ -386,12 +388,108 @@ function tripView(trip) {
     h("div", { class: "trip-layout" },
       WIDE.matches && h("aside", { class: "trip-info", "aria-label": "About this place" }, infoPanel(selectedItem(trip, days), trip, days)),
       h("div", { class: "trip-main stack" },
-        h("div", { class: "tabs", role: "tablist" }, ["itinerary", "budget"].map((t) =>
+        h("div", { class: "tabs", role: "tablist" }, Object.entries(TABS).map(([t, label]) =>
           h("button", { role: "tab", type: "button", "aria-selected": String(ui.tab === t), class: ui.tab === t ? "active" : "",
-            onclick: () => { ui.tab = t; ui.editingItem = null; ui.attachOpen = null; render(); } }, t === "itinerary" ? "Itinerary" : "Budget"))),
-        ui.tab === "itinerary" ? itineraryView(trip, days) : budgetView(trip, days)),
+            onclick: () => { ui.tab = t; ui.editingItem = null; ui.attachOpen = null; render(); } }, label))),
+        ui.tab === "guide" ? guideView(trip) : ui.tab === "budget" ? budgetView(trip, days) : itineraryView(trip, days)),
       h("aside", { class: "trip-budget", "aria-label": "Budget" },
         budgetSummary(trip, days))));
+}
+
+const TABS = { itinerary: "Itinerary", budget: "Budget", guide: "Good to know" };
+
+/* ----- "Good to know" tab: entry rules, etiquette, money, plugs, emergency numbers ----- */
+
+const ext = (link, text) => h("a", { href: link.url, target: "_blank", rel: "noopener" }, text ?? link.label, " ↗");
+const linkList = (links) => h("ul", { class: "guide-links" }, links.filter(Boolean).map((l) => h("li", null, ext(l))));
+const guideSec = (title, ...body) => h("section", { class: "card guide-sec" }, h("h3", null, title), ...body);
+const bullets = (items, cls) => h("ul", { class: `guide-list ${cls || ""}` }, items.map((t) => h("li", null, t)));
+
+function guideView(trip) {
+  const dest = getCountry(trip.country);
+  if (!dest) {
+    return h("div", { class: "card pad guide-empty" },
+      h("h2", null, "Good to know"),
+      h("p", { class: "muted" }, "Set this trip's country to see entry rules, do's and don'ts, money tips, plugs and emergency numbers for it."),
+      h("button", { class: "btn primary", type: "button", onclick: () => { ui.editingTrip = true; render(); window.scrollTo({ top: 0 }); } }, "Set the country"));
+  }
+  const homeC = getCountry(home.country);
+  const guide = getGuide(dest.code);
+  const going = homeC && homeC.code === dest.code;
+
+  const intro = h("div", { class: "guide-head" },
+    h("h2", null, `Good to know: ${dest.name}`),
+    h("p", { class: "small muted" },
+      homeC ? `Tailored for a ${homeC.name} passport. ` : "",
+      h("button", { class: "linkish", type: "button", onclick: () => { ui.homeOpen = true; render(); window.scrollTo({ top: 0 }); } }, homeC ? "Not your passport?" : "Set where you're from"),
+      " Entry rules change, so always confirm on the official sites before you book or fly."));
+
+  return h("div", { class: "guide stack" }, intro,
+    going
+      ? guideSec("Entry", h("p", null, `This is your home country, so you won't need a visa. Make sure your passport is valid.`))
+      : visaSection(guide, dest, homeC),
+    guide ? curatedSections(guide, dest) : liveSections(dest));
+}
+
+function visaSection(guide, dest, homeC) {
+  const v = visaFor(guide, dest.code, homeC?.code);
+  const schengen = isSchengen(dest.code);
+  const rows = [];
+  if (v.specific) rows.push(h("p", { class: "guide-visa" }, h("strong", null, v.specific)));
+  if (v.general) rows.push(h("p", null, v.general));
+  if (v.checkList) {
+    rows.push(h("p", { class: "guide-check" }, guide
+      ? `We haven't checked the rules for ${homeC ? `${homeC.name} passports` : "your passport"} here, so look your passport up in the official list below.`
+      : `We don't have a checked summary for ${dest.name} yet. Check the official sources below for your passport.`));
+  }
+  if (schengen) rows.push(h("p", null, SCHENGEN_NOTE.text, " ", ext(SCHENGEN_NOTE.link)));
+  const steps = guide?.visa?.steps ?? [];
+  if (steps.length) {
+    rows.push(h("h4", null, "Before you go"),
+      h("ul", { class: "guide-list" }, steps.map((s) => h("li", null, s.text, s.link && [" ", ext(s.link)]))));
+  }
+  rows.push(h("h4", null, "Official sources"),
+    linkList([
+      ...(guide?.visa?.links ?? []),
+      homeAdviceLink(homeC?.code),
+      { label: "IATA Travel Centre: passport, visa and health rules by nationality", url: "https://www.iatatravelcentre.com/" },
+      visaOverviewLink(homeC?.code),
+    ]));
+  rows.push(h("p", { class: "small muted guide-note" }, `Checked ${guide ? GUIDES_CHECKED : "against the links above"}. Visa rules depend on your passport and the purpose of your trip, and they change. The official sites have the final say.`));
+  return guideSec("Visa and entry", ...rows);
+}
+
+function curatedSections(g, dest) {
+  return [
+    h("div", { class: "guide-grid" },
+      guideSec("Do", bullets(g.dos, "do")),
+      guideSec("Don't", bullets(g.donts, "dont"))),
+    h("div", { class: "guide-grid" },
+      guideSec("Money and tipping", bullets(g.money)),
+      guideSec("Emergency numbers",
+        h("ul", { class: "guide-sos" }, g.emergency.map(([label, n]) =>
+          h("li", null, h("span", null, label), h("a", { class: "num", href: `tel:${n.split(" ")[0].replace(/[^\d+]/g, "")}` }, n)))),
+        h("h4", null, "Plugs and power"), h("p", null, g.plugs))),
+    guideSec("Getting around", bullets(g.transport)),
+    guideSec("More reading", linkList([...g.links, { label: `${dest.name} on Wikivoyage (community travel guide)`, url: wikivoyageUrl(dest.name) }])),
+  ];
+}
+
+function liveSections(dest) {
+  const box = h("div", { class: "stack", "aria-live": "polite" },
+    h("p", { class: "small muted info-loading" }, `Loading tips for ${dest.name} from Wikivoyage…`));
+  getWikivoyage(dest.name).then((wv) => {
+    if (!wv.sections.length) throw new Error("empty");
+    box.replaceChildren(
+      ...wv.sections.map((s) => guideSec(s.title, ...s.blocks.map((b) => b.type === "p" ? h("p", null, b.text) : bullets(b.items)))),
+      h("p", { class: "small muted" }, "These tips come from ", ext({ url: wv.url }, `Wikivoyage's ${wv.title} guide`),
+        ", written by travellers (CC BY-SA). For entry rules, trust the official sources above."));
+  }).catch(() => {
+    box.replaceChildren(guideSec("More reading",
+      h("p", { class: "small muted" }, "Couldn't load tips right now."),
+      linkList([{ label: `${dest.name} on Wikivoyage (community travel guide)`, url: wikivoyageUrl(dest.name) }])));
+  });
+  return box;
 }
 
 /* ----- live budget summary (right column) ----- */

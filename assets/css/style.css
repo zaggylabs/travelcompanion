@@ -372,3 +372,28 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 .home-card > p { margin: 0 0 12px; max-width: 60ch; }
 @media (max-width: 420px) { .home-btn { margin-left: auto; } .theme-toggle { margin-left: 0; } }
 .items > li { min-width: 0; }
+
+/* "Good to know" tab */
+.guide-head h2 { margin: 0 0 4px; }
+.guide-head p { margin: 0; max-width: 70ch; }
+.guide-sec { padding: 16px; display: grid; gap: 8px; min-width: 0; }
+.guide-sec h3 { margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--subtle); }
+.guide-sec h4 { margin: 6px 0 0; font-size: 0.9rem; }
+.guide-sec p { margin: 0; font-size: 0.92rem; }
+.guide-visa { padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); }
+.guide-check { padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, #f59e0b 14%, var(--surface)); }
+.guide-note { margin-top: 4px !important; }
+.guide-list { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; font-size: 0.92rem; }
+.guide-list.do li::marker { content: "✓  "; color: var(--good); }
+.guide-list.dont li::marker { content: "✕  "; color: var(--bad); }
+.guide-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 0.92rem; }
+.guide a { color: var(--accent-strong); overflow-wrap: anywhere; }
+:root[data-theme="dark"] .guide a { color: var(--good); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .guide a { color: var(--good); } }
+.guide-sos { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 0.92rem; }
+.guide-sos li { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.guide-sos a { font-weight: 650; white-space: nowrap; text-decoration: none; }
+.guide-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+@container (min-width: 620px) { .guide-grid { grid-template-columns: 1fr 1fr; } }
+.guide-empty { display: grid; gap: 8px; justify-items: start; }
+.guide-empty h2, .guide-empty p { margin: 0; }
