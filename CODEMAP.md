@@ -25,6 +25,7 @@ Plain static site: no build step, no API keys. The only server code is one Cloud
 | `places.js` | Photon place search and ranking (`searchPlaces` takes one country or a list), Google Maps links |
 | `placeinfo.js` | Place info panel data: OSM tags, Wikipedia summary, public holidays, crowd tips |
 | `discover.js` | Discover tab: Overpass queries, Photon fallback, distance, sort, cache |
+| `travel.js` | Flight / transport plans: modes, titles, times, and `arrivals()` (where travel lands you, used by `dayBase`) |
 | `ideas.js` | Saved places groups, turning a saved place into a plan |
 | `pagemeta.js` | Reads Open Graph tags and schema.org JSON-LD from raw HTML (used by the function) |
 | `booking.js` | Pasted booking links (Booking.com, Agoda, Klook, Airbnb…): site name, colour, name and group guessed from the URL, `isPreviewHost` allowlist for the function |
@@ -45,11 +46,12 @@ Plain static site: no build step, no API keys. The only server code is one Cloud
   country,            // first country, kept for older code paths
   countries: ["ES","CH"],
   cities: [{ name, country, lat?, lon? }], destination: "Barcelona & Zurich",
-  dayBases: { "2026-12-10": { city, area?, lat?, lon? } },  // days not set carry on from the last set day
+  dayBases: { "2026-12-10": { city, area?, lat?, lon? } },  // a day's own 📍 wins; else a travel plan arriving in a trip city that day; else carries on from the last of those
   currency,           // "Totals in": totals and budget limits are in this
   budget: { Food: 300, ... },
   items: [{ id, date, time, title, location, category, estimatedCost, actualCost, paid,
             currency?,  // only when different from trip.currency
+            travel?: { mode: "flight|train|bus|ferry|car", from, to, number, arrive, nextDay },  // time = departure
             notes, link, place?: { osm, lat, lon, kind, area, cc? }, fromIdea?, attachments?: [...] }],
   ideas: [{ id, title, group, location, link, bookingLink?, details?: { address, area, rating, ratingScale, reviews, stars, image, price }, notes, place?, createdAt }] }  // a plan made from one gets bookingLink || link
 ```

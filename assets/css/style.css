@@ -462,7 +462,7 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 }
 
 /* To-pay checklist (right column) */
-.pay-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.pay-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .pay-list label { display: flex; align-items: flex-start; gap: 10px; padding: 6px 4px; border-radius: 8px; cursor: pointer; }
 .pay-list label:hover { background: var(--muted-bg); }
 .pay-list input[type="checkbox"] { padding: 0; width: 18px; height: 18px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
@@ -562,3 +562,8 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 form[data-mode="manual"] .link-field, form[data-mode="manual"] .details-label { display: none; }
 .details-label { margin: 4px 0 -6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.72rem; }
 @container (max-width: 420px) { .idea-modes { grid-template-columns: 1fr; } }
+
+/* Flight / transport plans */
+.add-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.travel-day { margin: -4px 0 6px; color: var(--accent); font-weight: 600; }
+.check.next-day { margin-top: -4px; }

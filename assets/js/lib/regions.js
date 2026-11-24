@@ -2,6 +2,8 @@
 // Popular cities and areas are hand-picked so the trip form and day picker can offer
 // one-tap choices instead of a blank box; anything else is searched on Photon.
 
+import { arrivals } from "./travel.js";
+
 // Popular cities per country, roughly in order of how often people visit them.
 const CITIES = {
   JP: "Tokyo|Osaka|Kyoto|Sapporo|Fukuoka|Nara|Hiroshima|Yokohama|Nagoya|Hakone|Kanazawa|Okinawa",
@@ -122,13 +124,22 @@ export function dayBase(trip, date, days) {
   const own = bases[date];
   if (own?.city) return { ...own, set: true };
   const cities = tripCities(trip);
+  const cityAt = (name) => cities.find((c) => norm(c.name) === norm(name));
+  // A flight or train that lands in one of the trip's cities moves you there, until a later 📍 says otherwise.
+  const landed = arrivals(trip?.items, (name) => Boolean(cityAt(name)));
+  const arrive = (name, extra) => {
+    const city = cityAt(name);
+    return { city: city.name, area: "", lat: city.lat, lon: city.lon, set: false, arrived: true, ...extra };
+  };
+  if (landed[date]) return arrive(landed[date]);
   const i = days.indexOf(date);
   for (let j = i - 1; j >= 0; j--) {
     const prev = bases[days[j]];
     if (prev?.city) {
-      const city = cities.find((c) => norm(c.name) === norm(prev.city));
+      const city = cityAt(prev.city);
       return { city: prev.city, area: "", lat: city?.lat, lon: city?.lon, set: false, from: j };
     }
+    if (landed[days[j]]) return arrive(landed[days[j]], { from: j });
   }
   if (cities.length === 1) return { city: cities[0].name, area: "", lat: cities[0].lat, lon: cities[0].lon, set: false };
   return null;
