@@ -22,7 +22,7 @@ const clean = (t) => t.replace(/\[\d+\]|\[edit\]/g, "").replace(/\s+/g, " ").tri
 /** HTML of one section -> [{ type: "p", text } | { type: "ul", items }], skipping headings and boxes. */
 function blocksFrom(html) {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  doc.querySelectorAll("style, script, .mw-editsection, sup.reference, .thumb, figure, table, .noprint, .pagebanner").forEach((n) => n.remove());
+  doc.querySelectorAll("style, script, .mw-editsection, sup.reference, .thumb, figure, table, .noprint, .pagebanner, .toc, #toc, .mw-toc, .toclimit-2, .toclimit-3").forEach((n) => n.remove());
   const blocks = [];
   for (const el of doc.body.querySelectorAll("p, ul, dl")) {
     if (el.closest("li")) continue; // nested lists are part of their parent
