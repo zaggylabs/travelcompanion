@@ -290,8 +290,8 @@ function tripList(trips, homeShowing) {
 
   return h("div", { class: "stack home" },
     h("header", { class: "hero" },
-      h("h1", null, trips.length ? "Plan your next holiday" : "Plan your holiday"),
-      h("p", { class: "muted" }, "Pick a country, your cities and dates, and we'll help you plan every day and keep track of what it costs. No spreadsheet needed.")),
+      h("h1", null, trips.length ? "Where to next?" : "Let's plan your next getaway"),
+      h("p", { class: "muted" }, "Pick a country, your cities and dates, and we'll help you map out every day and keep an eye on what it costs. No spreadsheet needed, just a cup of coffee.")),
     h("section", { class: `card new-trip${creating ? " pad open" : ""}`, "aria-label": "New trip" }, creating
       ? [h("h2", null, "Plan a new trip"),
          tripForm(emptyTrip(), "Create trip", (t) => {
@@ -301,7 +301,7 @@ function tripList(trips, homeShowing) {
          }, trips.length ? () => { ui.creatingTrip = false; render(); } : null)]
       : h("button", { class: "new-trip-btn", type: "button", onclick: start },
           h("span", { class: "new-trip-plus", "aria-hidden": "true" }, "+"),
-          h("span", null, h("strong", null, "Plan a new trip"), h("span", { class: "small muted" }, "Country, cities and dates, one step at a time")))),
+          h("span", null, h("strong", null, "Start a new adventure"), h("span", { class: "small muted" }, "Country, cities and dates, one easy step at a time")))),
     upcoming.length > 0 && h("section", { class: "stack-sm" },
       h("h2", null, past.length ? "Upcoming trips" : "Your trips"),
       h("ul", { class: "trip-grid" }, upcoming.map(tripCard))),
@@ -329,6 +329,12 @@ const countryIcon = (code) => (FLAGS_OK && code ? flag(code) : "🌏");
 function placeLine(trip) {
   const names = tripCountries(trip).map(getCountry).filter(Boolean).map((c) => (FLAGS_OK ? `${flag(c.code)} ${c.name}` : c.name));
   return [destinationText(names), trip.destination].filter(Boolean).join(" · ");
+}
+
+/** A warm, centred empty state card: big emoji, a short title, one line of help. */
+function emptyState(icon, title, text) {
+  return h("div", { class: "card empty-state" },
+    h("span", { class: "empty-icon", "aria-hidden": "true" }, icon), h("strong", null, title), text && h("p", { class: "small" }, text));
 }
 
 function field(label, control, cls) {
@@ -1074,7 +1080,7 @@ function itineraryView(trip, days) {
                !WIDE.matches && selected?.id === item.id && ui.selectedItem === item.id && h("div", { class: "info-inline" }, infoPanel(item, trip, days))])),
           h("li", null, e?.mode === "new" && e.date === g.key
             ? itemForm(emptyItem(g.key), trip, days, saveItem, cancel)
-            : h("button", { class: "btn ghost", type: "button", onclick: () => { ui.editingItem = { mode: "new", date: g.key }; ui.attachOpen = null; render(); } }, "+ Add plan"))));
+            : h("button", { class: "btn ghost", type: "button", onclick: () => { ui.editingItem = { mode: "new", date: g.key }; ui.attachOpen = null; render(); } }, "+ Add a plan"))));
     }));
 }
 
@@ -1322,7 +1328,7 @@ function ideasView(trip, days) {
           h("strong", null, "Add to itinerary"), " and pick the day and time.")),
       adding && ideaForm(emptyIdea(ui.lastIdeaGroup || "Food"), trip, days, addNew, null, null, focus)),
     groups.length === 0
-      ? h("p", { class: "card pad center muted" }, "Nothing saved yet. Places you add above show up here, grouped by type.")
+      ? emptyState("🧳", "Your saved places will live here", "Jot down cafés, sights and stays you'd love to visit. They'll be grouped by type, ready to drop into a day.")
       : groups.map((g) => h("section", { class: "day", "aria-label": g.label },
           h("div", { class: "day-head" }, h("h3", null, g.label), h("span", { class: "muted" }, String(g.ideas.length))),
           h("ul", { class: "items" }, g.ideas.map((idea) => h("li", null,
@@ -1820,7 +1826,7 @@ function discoverView(trip, days) {
 
 function discoverResults(trip, days, d) {
   if (d.status === "idle") {
-    return h("p", { class: "card pad center muted" }, "Pick what you're after, type an area like a neighbourhood or station, and press Search.");
+    return emptyState("🧭", "Let's go exploring", "Pick what you're after, type an area like a neighbourhood or station, and press Search.");
   }
   if (d.status === "loading") {
     return h("p", { class: "card pad center muted info-loading" }, `Looking for ${discoverType(d.type).label.toLowerCase()} near ${d.area?.text === d.areaText ? d.area.name : d.areaText}…`);
@@ -2009,7 +2015,7 @@ function attachPanel(item, trip) {
   const panel = h("div", { class: "attach-panel card", role: "region", "aria-label": `Attachments for ${item.title}` },
     files.length
       ? h("ul", { class: "files" }, rows)
-      : h("p", { class: "small muted" }, "No attachments yet. Add tickets, booking confirmations or screenshots (images or PDFs)."),
+      : h("p", { class: "small muted" }, "Nothing tucked in here yet. Add tickets, booking confirmations or screenshots (images or PDFs)."),
     ui.attachError && h("p", { class: "error" }, ui.attachError),
     h("div", { class: "actions" },
       h("button", { class: "btn", type: "button", disabled: ui.attachBusy, onclick: () => input.click() },

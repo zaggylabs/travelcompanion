@@ -8,8 +8,8 @@ Plain static site: no build step, no API keys. The only server code is one Cloud
 | File | What it does |
 |---|---|
 | `index.html` | Page shell: header (Home currency button, theme toggle), `#app`, footer credits |
-| `assets/css/style.css` | All styles. Light/dark tokens at the top; trip page is 3 columns at ≥960px |
-| `assets/js/app.js` | All UI (≈2000 lines, plain DOM via `h()`). Sections, in order: home currency and rates, trip list, trip form (setup), trip view, Good to know, budget summary and to-pay list, itinerary, day 📍 picker, plan row, Saved places, Discover, attachments, plan form, place info panel, Budget tab |
+| `assets/css/style.css` | All styles. Warm light/dark tokens at the top (terracotta accent, Nunito + Fraunces from Google Fonts in `index.html`); "Cozy layer" at the end overrides shapes, tabs, shadows; trip page is 3 columns at ≥960px |
+| `assets/js/app.js` | All UI (`emptyState(icon, title, text)` for empty cards) (≈2000 lines, plain DOM via `h()`). Sections, in order: home currency and rates, trip list, trip form (setup), trip view, Good to know, budget summary and to-pay list, itinerary, day 📍 picker, plan row, Saved places, Discover, attachments, plan form, place info panel, Budget tab |
 | `assets/js/autocomplete.js` | Suggestion dropdown used for countries and places |
 | `assets/js/theme.js` | Light/dark toggle (loaded before CSS) |
 | `assets/js/lib/*.js` | Logic with no DOM, unit tested in `tests/` |
