@@ -351,8 +351,30 @@ function foldable(parts) {
       onclick: () => { for (const el of p.els) el.hidden = false; draw(); p.els[0].querySelector("input:not([type=file]), textarea, select, button")?.focus(); } }, `+ ${p.label}`)));
     chips.hidden = !chips.childElementCount;
   };
+  // ✕ on an open part empties it (unticks, unlinks, drops files) and folds it back into its chip.
+  const fire = (el) => { el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); };
+  const clear = (p) => {
+    for (const el of p.els) {
+      for (const c of el.querySelectorAll("input:not([type=file]), textarea, select")) {
+        if (c.type === "checkbox") { if (c.checked) { c.checked = false; fire(c); } }
+        else if (c.tagName === "SELECT") { if ([...c.options].some((o) => o.value === "") && c.value) { c.value = ""; fire(c); } }
+        else if (c.value) { c.value = ""; fire(c); }
+      }
+      el.clearFiles?.();
+      el.hidden = true;
+    }
+    draw();
+  };
   // A part is one element (el) or several shown together (els).
-  for (const p of parts) { p.els = (p.els ?? [p.el]).filter(Boolean); for (const el of p.els) el.hidden = !p.open; }
+  for (const p of parts) {
+    p.els = (p.els ?? [p.el]).filter(Boolean);
+    for (const el of p.els) el.hidden = !p.open;
+    const x = h("button", { class: "fold-x", type: "button", title: `Remove ${p.label.toLowerCase()}`, "aria-label": `Remove ${p.label.toLowerCase()}`,
+      onclick: (e) => { e.preventDefault(); clear(p); } }, "✕ Remove");
+    const head = p.els[0];
+    head.classList.add("foldable");
+    if (head.setFoldX) head.setFoldX(x); else head.append(x);
+  }
   draw();
   return [...parts.flatMap((p) => p.els), chips];
 }
@@ -2532,6 +2554,7 @@ function attachPanel(item, trip) {
 // The Attachments section of a form (plans and bookings). New files wait in memory and removals
 // wait until `commit` on Save; Cancel drops both.
 function formFiles(item) {
+  let foldX = null; // the ✕ Remove button, when the section can be folded away
   const pending = [...(item.pendingFiles ?? [])];
   const removing = new Set(item.removingFiles ?? []);
   const filesBox = h("div", { class: "field span-all form-files" });
@@ -2559,8 +2582,11 @@ function formFiles(item) {
       h("div", { class: "actions" },
         h("button", { class: "btn", type: "button", onclick: () => fileInput.click() }, clipIcon(), "Attach file"),
         h("span", { class: "small muted" }, "Tickets, bookings or screenshots (images or PDFs). Saved in this browser only."),
-        fileInput)].filter(Boolean)); // replaceChildren would print a null as "null"
+        fileInput),
+      foldX].filter(Boolean)); // replaceChildren would print a null as "null"
   }
+  filesBox.setFoldX = (x) => { foldX = x; drawFiles(); };
+  filesBox.clearFiles = () => { pending.length = 0; for (const f of item.attachments ?? []) removing.add(f.id); fileError = ""; drawFiles(); };
   drawFiles();
   filesBox.addEventListener("dragover", (e) => { e.preventDefault(); filesBox.classList.add("drop"); });
   filesBox.addEventListener("dragleave", () => filesBox.classList.remove("drop"));
