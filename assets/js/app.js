@@ -677,6 +677,7 @@ function tripView(trip) {
             plural(trip.travelers, "traveler"),
           ].filter(Boolean).join(" · "))),
         h("div", { class: "actions" },
+          guideButton(trip),
           h("button", { class: "btn", type: "button", onclick: () => { ui.editingTrip = true; render(); } }, "Edit trip"),
           h("button", { class: "btn", type: "button", title: "In Excel: File › Save As › CSV, then import that file", onclick: () => fileInput.click() }, "Import CSV"),
           h("button", { class: "btn", type: "button", disabled: trip.items.length === 0, title: "Opens in Excel or Google Sheets", onclick: () => exportCsv(trip) }, "Export CSV"),
@@ -704,7 +705,19 @@ function tripView(trip) {
         : h("aside", { class: "trip-budget", "aria-label": "Budget" }, budgetSummary(trip, days))));
 }
 
-const TABS = { itinerary: "Itinerary", discover: "Discover", ideas: "Saved places", bookings: "Bookings", budget: "Budget", guide: "Good to know" };
+// "Good to know" is about the destination, not one day of the trip, so it sits by the trip's name rather than in the tabs.
+function guideButton(trip) {
+  const ccs = tripCountries(trip);
+  if (!ccs.length) return null;
+  const open = ui.tab === "guide";
+  const where = ccs.length === 1 ? [countryIcon(ccs[0]), " ", getCountry(ccs[0])?.name ?? ccs[0]] : ccs.map((c) => countryIcon(c)).join(" ");
+  return h("button", { class: `btn guide-btn${open ? " active" : ""}`, type: "button", "aria-pressed": String(open),
+    title: open ? "Back to the itinerary" : "Visas, money, plugs, etiquette and emergency numbers",
+    onclick: () => { Object.assign(ui, { tab: open ? "itinerary" : "guide", editingItem: null, attachOpen: null, editingIdea: null, schedulingIdea: null, editingBooking: null }); render(); } },
+    "💡 Good to know · ", where);
+}
+
+const TABS = { itinerary: "Itinerary", discover: "Discover", ideas: "Saved places", bookings: "Bookings", budget: "Budget" };
 
 /* ----- "Good to know" tab: entry rules, etiquette, money, plugs, emergency numbers ----- */
 
