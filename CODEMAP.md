@@ -30,7 +30,7 @@ Plain static site: no build step, no API keys. The only server code is three Clo
 | `discover.js` | Discover tab: Overpass queries, dietary filters (`DIETS`, `dietsOf`; food and cafés only), `quickPlaces` (Photon) and `detailedPlaces` (/api/discover), distance, sort, browser cache |
 | `airports.js` | Airport search for flight plans over `assets/data/airports.txt` (OurAirports, public domain; ~3,200 airports with scheduled flights, loaded on first use) |
 | `travel.js` | Flight / transport plans: modes, titles, times, and `arrivals()` (where travel lands you, used by `dayBase`) |
-| `ideas.js` | Saved places groups, turning a saved place into a plan |
+| `ideas.js` | Saved places: groups, sub-tabs (`IDEA_TABS`: Hotels, Activities, Food, Places, Other), each kind's cost (`ideaCost`), and `ideaToItems` (a hotel becomes check-in + check-out plans with the stay's cost on check-in; others one plan with their cost) |
 | `pagemeta.js` | Reads Open Graph tags and schema.org JSON-LD from raw HTML (used by the function) |
 | `booking.js` | Pasted booking links (Booking.com, Agoda, Klook, Airbnb…): site name, colour, name and group guessed from the URL, `isPreviewHost` allowlist for the function |
 | `guides.js` | Hand-written Good to know guides (visa, do's and don'ts, money, transport, links) |
@@ -58,7 +58,12 @@ Plain static site: no build step, no API keys. The only server code is three Clo
             currency?,  // only when different from trip.currency
             travel?: { mode: "flight|train|bus|ferry|car", from, to, number, arrive, nextDay, fromAirport?, toAirport? (IATA), fromAirportName?, toAirportName? },  // Flights/Transport plans with a route; time = departure
             notes, link, place?: { name, osm?, lat, lon, kind, area, cc? }, fromIdea?, attachments?: [...] }],
-  ideas: [{ id, title, group, location, link, bookingLink?, details?: { address, area, rating, ratingScale, reviews, stars, image, price }, notes, place?, createdAt }] }  // a plan made from one gets bookingLink || link
+  ideas: [{ id, title, group, location, link, bookingLink?, details?: { address, area, rating, ratingScale, reviews, stars, image, price }, notes, place?, createdAt,
+             info?: { // by sub-tab (kindFields in app.js); empty fields left out
+               // Hotels: checkIn, checkOut, pricePerNight, total, currency, confirmation, paid
+               // Activities: date, duration, pricePerPerson, people, total, currency, hours, paid
+               // Food: cuisine, priceRange ("$".."$$$$"), diets ["Halal", …]   Places: hours, entryFee, people, currency   Other: cost, currency, paid
+             } }] }  // plans made from one get bookingLink || link, its cost, currency and paid
 ```
 
 Older trips may lack `countries`, `cities`, a city's `country`, or `paid`. The helpers in `regions.js` and `budget.js` fill those in when reading, so don't assume the fields exist.

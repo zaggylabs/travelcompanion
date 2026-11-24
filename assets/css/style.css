@@ -772,3 +772,27 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .form-files .actions .btn { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
 .form-files .actions .btn svg { width: 16px; height: 16px; }
 .form-files.drop { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }
+
+/* Saved places sub-tabs and kind-specific forms */
+.ideas-head h2 { margin: 0 0 2px; }
+.ideas-head p { margin: 0; }
+.subtabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.subtab {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 7px 14px;
+  border: 1px solid var(--line); border-radius: 99px; background: var(--surface); color: var(--subtle);
+  font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+}
+.subtab:hover { color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.subtab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.subtab[aria-selected="true"] .tab-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
+.subtab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.idea-add-btn { justify-self: start; align-self: flex-start; }
+.idea-new { display: grid; gap: 12px; border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.idea-new h3 { margin: 0; }
+.nights { display: flex; align-items: center; min-height: 38px; font-weight: 650; }
+.diet-checks { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 0; border: 0; }
+.diet-checks legend { width: 100%; margin-bottom: 6px; padding: 0; font-size: 0.85rem; font-weight: 600; color: var(--subtle); }
+.form-grid > .check { align-self: end; min-height: 38px; }
+.idea-facts { margin-top: 2px; color: var(--fg); }
+.idea-facts .paid { color: var(--good); }
+.diet-tag { padding: 0 6px; border-radius: 99px; background: var(--accent-soft); font-weight: 600; }

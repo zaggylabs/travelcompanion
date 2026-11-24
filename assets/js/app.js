@@ -17,7 +17,7 @@ import { csvToItems, itemsToCsv } from "./lib/csv.js";
 import { parseBookingLink } from "./lib/booking.js";
 import { airportCode, airportLabel, loadAirports, searchAirports } from "./lib/airports.js";
 import { TRAVEL_MODES, airportRoute, routeText, travelMode, travelTimes, travelTitle } from "./lib/travel.js";
-import { IDEA_GROUPS, emptyIdea, groupForPlace, groupIdeas, groupOf, ideaToItem } from "./lib/ideas.js";
+import { IDEA_TABS, PRICE_RANGES, emptyIdea, groupForPlace, groupIdeas, groupOf, ideaCost, ideaToItem, ideaToItems, nightsBetween, tabOf } from "./lib/ideas.js";
 import { deleteTrip, loadTrips, saveTrip, STORAGE_KEY } from "./lib/store.js";
 import {
   ACCEPT, MAX_FILE_BYTES, deleteFile, deleteItemFiles, deleteTripFiles, formatSize, getFile, isAllowedType, putFile, requestPersistence,
@@ -89,7 +89,7 @@ function loadRates() {
 /** Someone is typing or has a form open, so rebuilding the page now would wipe what they've entered. */
 function formBusy() {
   const typing = root.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
-  const draftIdea = Boolean(root.querySelector(".ideas-add input[name=title]")?.value);
+  const draftIdea = Boolean(ui.addingIdea || root.querySelector(".idea-new input[name=title]")?.value);
   const newTrip = Boolean(root.querySelector("form.trip-form"));
   return typing || newTrip || draftIdea || Boolean(ui.editingItem || ui.editingTrip || ui.editingIdea || ui.schedulingIdea || ui.editingBase);
 }
@@ -1269,7 +1269,9 @@ const plansFrom = (trip, idea) => trip.items.filter((i) => i.fromIdea === idea.i
 function selectedIdea(trip) {
   const ideas = trip.ideas ?? [];
   const id = ui.editingIdea ?? ui.selectedIdea ?? ui.schedulingIdea;
-  return ideas.find((i) => i.id === id) ?? groupIdeas(ideas, (i) => plansFrom(trip, i).length > 0)[0]?.ideas[0] ?? null;
+  const tab = ideaTab(trip);
+  return ideas.find((i) => i.id === id)
+    ?? groupIdeas(ideas, (i) => plansFrom(trip, i).length > 0).filter((g) => tab.groups.includes(g.key))[0]?.ideas[0] ?? null;
 }
 
 // The info panel works on plans, so give it a saved place in that shape.
@@ -1296,60 +1298,117 @@ function goToPlan(planId) {
   root.querySelector(".item-wrap.selected")?.scrollIntoView({ block: "center" });
 }
 
+/** The open Saved places sub-tab: the one picked, else the first with something in it, else Hotels. */
+function ideaTab(trip) {
+  const ideas = trip.ideas ?? [];
+  return IDEA_TABS.find((t) => t.key === ui.ideaTab)
+    ?? IDEA_TABS.find((t) => ideas.some((i) => tabOf(i.group).key === t.key)) ?? IDEA_TABS[0];
+}
+
+/** Add a saved place to the itinerary: one plan, or a hotel's check-in and check-out. */
+function addIdeaPlans(trip, idea, when, days) {
+  const current = loadTrips().find((t) => t.id === trip.id);
+  if (!current) return;
+  const plans = ideaToItems(idea, when).map((p) =>
+    withCurrency(p, idea.info?.currency || planCurrency(current, idea.place?.cc || dayCountry(current, p.date, days)), current));
+  saveTrip({ ...current, items: [...current.items, ...plans] });
+}
+
 function ideasView(trip, days) {
   const ideas = trip.ideas ?? [];
-  const groups = groupIdeas(ideas, (i) => plansFrom(trip, i).length > 0);
+  const tab = ideaTab(trip);
+  const isAdded = (i) => plansFrom(trip, i).length > 0;
+  const list = groupIdeas(ideas, isAdded).filter((g) => tab.groups.includes(g.key)).flatMap((g) => g.ideas);
   const selected = selectedIdea(trip);
 
   const addNew = (idea) => {
-    updateIdeas(trip.id, (list) => [...list, idea]);
-    Object.assign(ui, { lastIdeaGroup: idea.group, selectedIdea: idea.id, focusIdeaForm: true });
+    updateIdeas(trip.id, (l) => [...l, idea]);
+    Object.assign(ui, { addingIdea: false, selectedIdea: idea.id });
     render();
   };
   const saveEdit = (idea) => {
-    updateIdeas(trip.id, (list) => list.map((i) => (i.id === idea.id ? idea : i)));
+    updateIdeas(trip.id, (l) => l.map((i) => (i.id === idea.id ? idea : i)));
     ui.editingIdea = null;
     render();
   };
   const remove = (idea) => {
-    updateIdeas(trip.id, (list) => list.filter((i) => i.id !== idea.id));
+    updateIdeas(trip.id, (l) => l.filter((i) => i.id !== idea.id));
     Object.assign(ui, { editingIdea: null, selectedIdea: null, schedulingIdea: null });
     render();
   };
-  const cancel = () => { ui.editingIdea = null; render(); };
-
-  const focus = Boolean(ui.focusIdeaForm);
-  ui.focusIdeaForm = false;
-  const adding = !ui.editingIdea;
+  const switchTab = (key) => { Object.assign(ui, { ideaTab: key, addingIdea: false, editingIdea: null, schedulingIdea: null, selectedIdea: null }); render(); };
+  const count = (t) => ideas.filter((i) => tabOf(i.group).key === t.key).length;
 
   return h("div", { class: "stack ideas" },
-    h("div", { class: "card pad stack ideas-add" },
-      h("div", null,
-        h("h2", null, "Saved places"),
-        h("p", { class: "small muted" }, "Jot down places you might go: somewhere to eat, a sight, an activity, where you're staying. When you know when, press ",
-          h("strong", null, "Add to itinerary"), " and pick the day and time.")),
-      adding && ideaForm(emptyIdea(ui.lastIdeaGroup || "Food"), trip, days, addNew, null, null, focus)),
-    groups.length === 0
-      ? emptyState("🧳", "Your saved places will live here", "Jot down cafés, sights and stays you'd love to visit. They'll be grouped by type, ready to drop into a day.")
-      : groups.map((g) => h("section", { class: "day", "aria-label": g.label },
-          h("div", { class: "day-head" }, h("h3", null, g.label), h("span", { class: "muted" }, String(g.ideas.length))),
-          h("ul", { class: "items" }, g.ideas.map((idea) => h("li", null,
-            ui.editingIdea === idea.id
-              ? ideaForm(idea, trip, days, saveEdit, cancel, () => remove(idea), true)
-              : [ideaRow(idea, trip, days, selected?.id === idea.id),
-                 ui.schedulingIdea === idea.id && schedulePanel(idea.title, days, (date, time) => {
-                   const current = loadTrips().find((t) => t.id === trip.id);
-                   if (current) saveTrip({ ...current, items: [...current.items, withCurrency(ideaToItem(idea, date, time), planCurrency(current, idea.place?.cc || dayCountry(current, date, days)), current)] });
-                   ui.schedulingIdea = null;
-                 }, () => { ui.schedulingIdea = null; }),
-                 !WIDE.matches && selected?.id === idea.id && ui.selectedIdea === idea.id && h("div", { class: "info-inline" }, infoPanel(ideaAsItem(idea), trip, days))]))))),
+    h("div", { class: "ideas-head" },
+      h("h2", null, "Saved places"),
+      h("p", { class: "small muted" }, "Keep hotels, activities and food spots here with their prices and bookings. When you know the day, press ",
+        h("strong", null, "Add to itinerary"), " and the cost goes into your budget.")),
+    h("div", { class: "subtabs", role: "tablist", "aria-label": "Kinds of saved places" }, IDEA_TABS.map((t) =>
+      h("button", { type: "button", role: "tab", class: "subtab", "aria-selected": String(t.key === tab.key), onclick: () => switchTab(t.key) },
+        h("span", { "aria-hidden": "true" }, t.icon), t.label, count(t) ? h("span", { class: "tab-count num" }, count(t)) : null))),
+    ui.addingIdea
+      ? h("div", { class: "card pad idea-new" },
+          h("h3", null, `${tab.icon} ${tab.add}`),
+          ideaForm(emptyIdea(tab.groups[0]), trip, days, { isNew: true, focus: true, onSave: addNew, onCancel: () => { ui.addingIdea = false; render(); } }))
+      : h("button", { class: "btn primary idea-add-btn", type: "button", onclick: () => { Object.assign(ui, { addingIdea: true, editingIdea: null, schedulingIdea: null }); render(); } }, `＋ ${tab.add}`),
+    list.length === 0
+      ? !ui.addingIdea && emptyState(tab.icon, `No ${tab.label.toLowerCase()} saved yet`, tab.key === "Stays"
+          ? "Add the hotels you've booked or are eyeing, with dates and prices. Paste a booking link to fill in the details."
+          : "Save them here with what they cost, then drop them into a day when you're ready.")
+      : h("ul", { class: "items" }, list.map((idea) => h("li", null,
+          ui.editingIdea === idea.id
+            ? ideaForm(idea, trip, days, { onSave: saveEdit, onCancel: () => { ui.editingIdea = null; render(); }, onDelete: () => remove(idea), focus: true })
+            : [ideaRow(idea, trip, days, selected?.id === idea.id),
+               ui.schedulingIdea === idea.id && (tabOf(idea.group).key === "Stays"
+                 ? stayPanel(idea, days, (when) => { addIdeaPlans(trip, idea, when, days); ui.schedulingIdea = null; }, () => { ui.schedulingIdea = null; })
+                 : schedulePanel(idea.title, days, (date, time) => { addIdeaPlans(trip, idea, { date, time }, days); ui.schedulingIdea = null; }, () => { ui.schedulingIdea = null; }, idea.info?.date)),
+               !WIDE.matches && selected?.id === idea.id && ui.selectedIdea === idea.id && h("div", { class: "info-inline" }, infoPanel(ideaAsItem(idea), trip, days))]))),
     ideas.length > 0 && h("p", { class: "small muted" }, "Saved places stay in this browser and aren't part of CSV exports. Plans you add from them are."));
+}
+
+const shortDay = (d) => (d ? formatDay(d).split(", ").slice(1).join(", ") || d : "");
+
+/** The line of facts under a saved place's name, by kind: dates and price for hotels, price × people for activities… */
+function ideaFacts(idea, trip) {
+  const i = idea.info ?? {};
+  const cur = i.currency || trip.currency;
+  const money = (n) => formatMoney(n, cur);
+  const cost = ideaCost(idea);
+  const paid = cost > 0 && (i.paid ? h("span", { class: "paid strong" }, "✓ Paid") : h("span", { class: "muted" }, "Not paid yet"));
+  const facts = [];
+  switch (tabOf(idea.group).key) {
+    case "Stays": {
+      const nights = nightsBetween(i.checkIn, i.checkOut);
+      if (i.checkIn || i.checkOut) facts.push(`📅 ${shortDay(i.checkIn) || "?"} → ${shortDay(i.checkOut) || "?"}${nights ? ` · ${plural(nights, "night")}` : ""}`);
+      if (cost) facts.push(h("span", { class: "num" }, money(cost), nights && !i.total && i.pricePerNight ? ` (${money(i.pricePerNight)}/night)` : nights && i.total ? ` (${money(cost / nights)}/night)` : ""));
+      if (i.confirmation) facts.push(`Conf. ${i.confirmation}`);
+      break;
+    }
+    case "Activities":
+      if (i.date) facts.push(`📅 ${shortDay(i.date)}`);
+      if (cost) facts.push(h("span", { class: "num" }, i.pricePerPerson && !i.total && (i.people || 1) > 1 ? `${money(i.pricePerPerson)} × ${i.people} = ${money(cost)}` : money(cost)));
+      if (i.duration) facts.push(`⏱ ${i.duration}`);
+      break;
+    case "Food":
+      facts.push(...[i.cuisine, i.priceRange].filter(Boolean));
+      for (const d of i.diets ?? []) facts.push(h("span", { class: "diet-tag" }, d));
+      break;
+    case "Sights":
+      if (i.hours) facts.push(`🕘 ${i.hours}`);
+      if (i.entryFee) facts.push(h("span", { class: "num" }, `Entry ${money(i.entryFee)}${(i.people || 1) > 1 ? ` × ${i.people}` : ""}`));
+      break;
+    default:
+      if (cost) facts.push(h("span", { class: "num" }, money(cost)));
+  }
+  if (paid) facts.push(paid);
+  return facts.length ? h("span", { class: "item-meta idea-facts" }, facts.map((f) => h("span", null, f))) : null;
 }
 
 function ideaRow(idea, trip, days, selected) {
   const plans = plansFrom(trip, idea);
   const scheduling = ui.schedulingIdea === idea.id;
-  const edit = () => { Object.assign(ui, { editingIdea: idea.id, selectedIdea: idea.id, schedulingIdea: null }); render(); };
+  const edit = () => { Object.assign(ui, { editingIdea: idea.id, selectedIdea: idea.id, schedulingIdea: null, addingIdea: false }); render(); };
   return h("div", { class: `item-wrap idea${selected ? " selected" : ""}${plans.length ? " added" : ""}` },
     h("div", { class: "item idea-card", role: "button", tabindex: "0", "aria-pressed": String(Boolean(selected)),
       title: selected ? "Click again to edit" : "Show info about this place",
@@ -1366,6 +1425,7 @@ function ideaRow(idea, trip, days, selected) {
         h("span", { class: "item-meta" },
           idea.location && h("span", null, idea.location),
           idea.notes && h("em", null, idea.notes)),
+        ideaFacts(idea, trip),
         idea.details?.rating && h("span", { class: "idea-rating small" }, "★ ", String(idea.details.rating), idea.details.ratingScale ? `/${idea.details.ratingScale}` : "",
           idea.details.reviews ? h("span", { class: "muted" }, ` (${idea.details.reviews.toLocaleString("en-GB")} reviews)`) : ""),
         idea.bookingLink && siteChip(idea.bookingLink),
@@ -1377,6 +1437,34 @@ function ideaRow(idea, trip, days, selected) {
       onclick: () => { Object.assign(ui, { schedulingIdea: scheduling ? null : idea.id, selectedIdea: idea.id, editingIdea: null }); render(); } },
       plans.length ? "Add again" : "Add to itinerary"),
     h("button", { class: "attach-btn", type: "button", "aria-label": `Edit ${idea.title}`, title: "Edit", onclick: edit }, pencilIcon()));
+}
+
+/** "Add <hotel> to your itinerary": check-in and check-out dates and times, from the hotel's own dates. */
+function stayPanel(idea, days, onAdd, onCancel) {
+  const i = idea.info ?? {};
+  const checkIn = h("input", { name: "checkIn", type: "date", required: true, autofocus: true, value: i.checkIn || days[0] || "" });
+  const checkOut = h("input", { name: "checkOut", type: "date", value: i.checkOut || "" });
+  const nights = h("span", { class: "small muted" });
+  const update = () => { const n = nightsBetween(checkIn.value, checkOut.value); nights.textContent = n ? plural(n, "night") : ""; };
+  checkIn.addEventListener("input", update);
+  checkOut.addEventListener("input", update);
+  update();
+  const form = h("form", { class: "attach-panel card schedule-panel" },
+    h("p", { class: "small" }, "Add ", h("strong", null, idea.title), " to your itinerary as a check-in and a check-out. The stay's cost goes on the check-in day."),
+    h("div", { class: "schedule-row" },
+      field("Check-in", checkIn), field("Time", h("input", { name: "checkInTime", type: "time", value: "15:00" })),
+      field("Check-out", checkOut), field("Time", h("input", { name: "checkOutTime", type: "time", value: "11:00" })),
+      nights,
+      h("div", { class: "actions" },
+        h("button", { class: "btn primary", type: "submit" }, "Add stay"),
+        h("button", { class: "btn", type: "button", onclick: () => { onCancel(); render(); } }, "Cancel"))));
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    onAdd({ checkIn: String(f.get("checkIn")), checkInTime: String(f.get("checkInTime")), checkOut: String(f.get("checkOut")), checkOutTime: String(f.get("checkOutTime")) });
+    render();
+  });
+  return form;
 }
 
 /** What /api/link-preview read from a booking page, or null when it couldn't (or we're on a plain static server). */
@@ -1411,13 +1499,13 @@ function siteChip(url) {
 }
 
 /** "Add <title> to your itinerary" with a day and an optional time. `onAdd(date, time)` saves it. */
-function schedulePanel(title, days, onAdd, onCancel) {
-  const fallback = days.includes(ui.lastScheduleDate) ? ui.lastScheduleDate : days[0] ?? "";
+function schedulePanel(title, days, onAdd, onCancel, preferDate) {
+  const fallback = [preferDate, ui.lastScheduleDate].find((d) => d && days.includes(d)) ?? days[0] ?? "";
   const daySelect = days.length
     ? h("select", { name: "date", autofocus: true },
         days.map((d, i) => h("option", { value: d, selected: d === fallback }, `Day ${i + 1} · ${formatDay(d)}`)),
         h("option", { value: "" }, "Unscheduled"))
-    : h("input", { name: "date", type: "date", autofocus: true, value: ui.lastScheduleDate || "" });
+    : h("input", { name: "date", type: "date", autofocus: true, value: preferDate || ui.lastScheduleDate || "" });
   const form = h("form", { class: "attach-panel card schedule-panel" },
     h("p", { class: "small" }, "Add ", h("strong", null, title), " to your itinerary"),
     h("div", { class: "schedule-row" },
@@ -1439,18 +1527,105 @@ function schedulePanel(title, days, onAdd, onCancel) {
   return form;
 }
 
-function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
-  const isNew = !onCancel;
+/**
+ * The fields only one kind of saved place has, and how to read them back into `idea.info`.
+ * Hotels: dates, nights, price per night, total, currency, confirmation, paid.
+ * Activities: date, duration, price per person, people, total, currency, hours, paid.
+ * Food: cuisine, price range, dietary tags. Places: hours, entry fee. Other: cost.
+ */
+function kindFields(kind, info, trip) {
+  const num = (name, value, attrs = {}) => h("input", { name, type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: value || "", ...attrs });
+  const currencies = [...new Set([info.currency, trip.currency, ...tripCountries(trip).map((c) => currencyForCountry(c)), home.currency].filter(Boolean))];
+  const currency = () => field("Currency", h("select", { name: "currency" }, currencies.map((c) => h("option", { selected: c === (info.currency || trip.currency) }, c))), "span-2");
+  const paid = () => h("label", { class: "check span-2" }, h("input", { name: "paid", type: "checkbox", checked: Boolean(info.paid) }), "Paid already");
+  const n = (f, k) => Number(f.get(k)) || 0;
+  const str = (f, k) => String(f.get(k) ?? "").trim();
+  const clean = (o) => { for (const k in o) if (o[k] === "" || o[k] === 0 || o[k] === false || o[k] == null || (Array.isArray(o[k]) && !o[k].length)) delete o[k]; return o; };
+
+  // A total that follows price × count until it's typed over.
+  const autoTotal = (priceIn, countOf, totalIn, note) => {
+    let typed = Boolean(info.total);
+    const sync = () => {
+      const count = countOf();
+      const price = Number(priceIn.value) || 0;
+      if (!typed) totalIn.value = price && count ? String(Math.round(price * count * 100) / 100) : "";
+      note?.(count);
+    };
+    totalIn.addEventListener("input", () => { typed = totalIn.value.trim() !== ""; if (!typed) sync(); });
+    return sync;
+  };
+
+  if (kind === "Stays") {
+    const checkIn = h("input", { name: "checkIn", type: "date", value: info.checkIn || "" });
+    const checkOut = h("input", { name: "checkOut", type: "date", value: info.checkOut || "" });
+    const price = num("pricePerNight", info.pricePerNight);
+    const total = num("total", info.total || (info.pricePerNight && nightsBetween(info.checkIn, info.checkOut) ? info.pricePerNight * nightsBetween(info.checkIn, info.checkOut) : ""));
+    const nights = h("output", { class: "nights num" });
+    const sync = autoTotal(price, () => nightsBetween(checkIn.value, checkOut.value), total, (c) => { nights.textContent = c ? plural(c, "night") : "–"; });
+    for (const el of [checkIn, checkOut, price]) el.addEventListener("input", sync);
+    sync();
+    return {
+      els: [field("Check-in", checkIn, "span-2"), field("Check-out", checkOut, "span-2"), field("Nights", nights, "span-2"),
+        field("Price per night", price, "span-2"), field("Total", total, "span-2"), currency(),
+        field("Confirmation no.", h("input", { name: "confirmation", placeholder: "Optional", value: info.confirmation || "" }), "span-4"), paid()],
+      read: (f) => clean({ checkIn: str(f, "checkIn"), checkOut: str(f, "checkOut"), pricePerNight: n(f, "pricePerNight"), total: n(f, "total"), currency: str(f, "currency"), confirmation: str(f, "confirmation"), paid: f.get("paid") === "on" }),
+    };
+  }
+  if (kind === "Activities") {
+    const price = num("pricePerPerson", info.pricePerPerson);
+    const people = h("input", { name: "people", type: "number", min: 1, step: 1, value: info.people || trip.travelers || 1 });
+    const total = num("total", info.total || (info.pricePerPerson ? info.pricePerPerson * (info.people || trip.travelers || 1) : ""));
+    const sync = autoTotal(price, () => Number(people.value) || 1, total);
+    for (const el of [price, people]) el.addEventListener("input", sync);
+    sync();
+    return {
+      els: [field("Date (optional)", h("input", { name: "date", type: "date", value: info.date || "" }), "span-2"),
+        field("Duration", h("input", { name: "duration", placeholder: "e.g. 3 hours", value: info.duration || "" }), "span-2"), currency(),
+        field("Price per person", price, "span-2"), field("People", people, "span-2"), field("Total", total, "span-2"),
+        field("Opening hours or meeting point", h("input", { name: "hours", placeholder: "Optional", value: info.hours || "" }), "span-4"), paid()],
+      read: (f) => clean({ date: str(f, "date"), duration: str(f, "duration"), currency: str(f, "currency"), pricePerPerson: n(f, "pricePerPerson"), people: n(f, "people"), total: n(f, "total"), hours: str(f, "hours"), paid: f.get("paid") === "on" }),
+    };
+  }
+  if (kind === "Food") {
+    const diets = new Set(info.diets ?? []);
+    return {
+      els: [field("Cuisine", h("input", { name: "cuisine", placeholder: "e.g. Ramen, Thai, café", value: info.cuisine || "" }), "span-3"),
+        field("Price range", h("select", { name: "priceRange" }, h("option", { value: "" }, "Not sure"),
+          PRICE_RANGES.map(([v, label]) => h("option", { value: v, selected: v === info.priceRange }, label))), "span-3"),
+        h("fieldset", { class: "span-all diet-checks" }, h("legend", null, "Dietary"),
+          DIETS.map((d) => h("label", { class: "check" }, h("input", { name: "diets", type: "checkbox", value: d.label, checked: diets.has(d.label) }), d.label)))],
+      read: (f) => clean({ cuisine: str(f, "cuisine"), priceRange: str(f, "priceRange"), diets: f.getAll("diets").map(String) }),
+    };
+  }
+  if (kind === "Sights") {
+    return {
+      els: [field("Opening hours", h("input", { name: "hours", placeholder: "e.g. 9:00–17:00", value: info.hours || "" }), "span-2"),
+        field("Entry fee per person", num("entryFee", info.entryFee), "span-2"), currency(),
+        h("input", { name: "people", type: "hidden", value: info.people || trip.travelers || 1 })],
+      read: (f) => clean({ hours: str(f, "hours"), entryFee: n(f, "entryFee"), currency: str(f, "currency"), people: n(f, "people") }),
+    };
+  }
+  return {
+    els: [field("Cost", num("cost", info.cost), "span-2"), currency(), paid()],
+    read: (f) => clean({ cost: n(f, "cost"), currency: str(f, "currency"), paid: f.get("paid") === "on" }),
+  };
+}
+
+function ideaForm(idea, trip, days, { onSave, onCancel, onDelete, focus, isNew = false }) {
+  const kind = tabOf(idea.group);
+  const withLinks = kind.links || Boolean(idea.bookingLink);
   const ccs = tripCountries(trip);
   const country = ccs.length === 1 ? getCountry(ccs[0]) : null;
   const titleInput = h("input", {
     name: "title", required: true, autofocus: focus || null, value: idea.title,
-    placeholder: ccs.length ? `A place in ${destinationText(ccs.map((c) => getCountry(c)?.name).filter(Boolean))}, e.g. a restaurant or sight` : "A restaurant, sight or activity",
+    placeholder: { Stays: "Hotel name", Activities: "e.g. teamLab Planets, a cooking class", Food: "Restaurant, café or stall", Sights: "e.g. a temple, a viewpoint" }[kind.key]
+      ?? (ccs.length ? `A place in ${destinationText(ccs.map((c) => getCountry(c)?.name).filter(Boolean))}` : "Name"),
   });
-  const groupSelect = h("select", { name: "group" }, IDEA_GROUPS.map((g) => h("option", { value: g.key, selected: g.key === idea.group }, g.label)));
-  const locationInput = h("input", { name: "location", placeholder: "Filled in when you pick a suggestion", value: idea.location });
-  let groupTouched = !isNew;
-  groupSelect.addEventListener("change", () => { groupTouched = true; });
+  // The sub-tab decides the kind, so there's no type picker; pages and suggestions don't move it either.
+  const groupSelect = { value: idea.group };
+  const locationInput = h("input", { name: "location", placeholder: kind.key === "Stays" ? "Filled in from the link or a suggestion" : "Filled in when you pick a suggestion", value: idea.location });
+  const groupTouched = true;
+  const extra = kindFields(kind.key, idea.info ?? {}, trip);
   let autoLocation = null;
   let picked = null;
 
@@ -1560,6 +1735,7 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
   // Pasting a link straight into the Place box works too.
   titleInput.addEventListener("input", () => {
     if (!parseBookingLink(titleInput.value)) return;
+    if (!withLinks) return;
     linkInput.value = titleInput.value.trim();
     titleInput.value = "";
     setMode("link");
@@ -1568,32 +1744,33 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
     if (!titleInput.value) titleInput.focus();
   });
   // New places: two clear ways in. Paste a booking link (details get filled in), or type it yourself.
-  const linkField = h("label", { class: "field span-all link-field" },
-    h("span", null, isNew ? "Booking link" : "Booking link (optional)"), linkInput, linkHint,
-    isNew && h("span", { class: "small muted" }, "Booking.com, Agoda, Klook, Airbnb, Trip.com and more. We fill in the name, area and type, and you can edit them below."));
+  const toggle = isNew && kind.links;
+  const linkField = withLinks && h("label", { class: "field span-all link-field" },
+    h("span", null, toggle ? "Booking link" : "Booking link (optional)"), linkInput, linkHint,
+    toggle && h("span", { class: "small muted" }, "Booking.com, Agoda, Klook, Airbnb, Trip.com and more. We fill in what we can, and you can edit it below."));
   const modeBtn = (m, icon, label) => h("button", { type: "button", role: "tab", class: `mode-btn mode-${m}`, onclick: () => setMode(m, true) }, h("span", { "aria-hidden": "true" }, icon), label);
-  const modes = isNew && h("div", { class: "idea-modes span-all", role: "tablist", "aria-label": "How to add a place" },
+  const modes = toggle && h("div", { class: "idea-modes span-all", role: "tablist", "aria-label": "How to add it" },
     modeBtn("link", "🔗", "Paste a booking link"), modeBtn("manual", "✏️", "Fill in manually"));
   const form = h("form", { class: `form-grid six${isNew ? "" : " card pad editing"}` },
     modes,
     linkField,
-    isNew && h("p", { class: "span-all small muted details-label" }, "Details"),
-    field("Place", placeBox.el, "span-4"),
-    field("Type", groupSelect, "span-2"),
-    field("Where", locationInput, "span-3"),
-    field("Note", h("input", { name: "notes", placeholder: "Optional, e.g. try the tonkotsu", value: idea.notes }), "span-3"),
+    toggle && h("p", { class: "span-all small muted details-label" }, "Details"),
+    field(kind.key === "Stays" ? "Hotel" : "Name", placeBox.el, "span-3"),
+    field(kind.key === "Stays" ? "Address" : "Where", locationInput, "span-3"),
+    ...extra.els,
+    field("Note", h("input", { name: "notes", placeholder: kind.key === "Food" ? "Optional, e.g. try the tonkotsu" : "Optional", value: idea.notes }), "span-all"),
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, isNew ? "Save place" : "Save"),
       onCancel && h("button", { class: "btn", type: "button", onclick: onCancel }, "Cancel"),
       onDelete && h("button", { class: "btn danger push", type: "button", onclick: onDelete }, "Delete")));
   function setMode(m, user) {
-    if (!isNew) return;
+    if (!toggle) return;
     ui.ideaMode = m;
     form.dataset.mode = m;
     for (const b of modes.querySelectorAll(".mode-btn")) b.setAttribute("aria-selected", String(b.classList.contains(`mode-${m}`)));
     if (user) (m === "link" ? linkInput : titleInput).focus();
   }
-  if (isNew) {
+  if (toggle) {
     setMode(ui.ideaMode || "link");
     if (form.dataset.mode === "link" && focus) { titleInput.removeAttribute("autofocus"); linkInput.setAttribute("autofocus", ""); }
   }
@@ -1606,10 +1783,11 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
     onSave({
       ...idea,
       title,
-      group: String(f.get("group")),
+      group: idea.group,
+      info: extra.read(f),
       location: String(f.get("location")).trim(),
       notes: String(f.get("notes")).trim(),
-      bookingLink: parseBookingLink(String(f.get("bookingLink") ?? ""))?.url ?? "",
+      bookingLink: withLinks ? parseBookingLink(String(f.get("bookingLink") ?? ""))?.url ?? "" : idea.bookingLink ?? "",
       details: parseBookingLink(String(f.get("bookingLink") ?? "")) ? details ?? undefined : undefined,
       // A renamed place without a new pick loses the old map link and place match.
       link: picked?.link ?? (same ? idea.link : ""),
