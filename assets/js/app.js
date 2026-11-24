@@ -6,6 +6,7 @@ import { baseLabel, basePoint, dayBase, destinationText, popularAreas, popularCi
 import { crowdTip, dayNote, getHolidays, getPlaceInfo } from "./lib/placeinfo.js";
 import { GUIDES_CHECKED, SCHENGEN_NOTE, getGuide, homeAdviceLink, isSchengen, visaFor, visaOverviewLink, wikivoyageUrl } from "./lib/guides.js";
 import { getWikivoyage } from "./lib/wikivoyage.js";
+import { emergencyRows, getFacts, plugAdvice } from "./lib/countryfacts.js";
 import { DISCOVER_TYPES, RADII, discoverPlaces, discoverType, formatDistance, sortResults } from "./lib/discover.js";
 import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
@@ -527,6 +528,7 @@ function guideView(trip) {
   const homeC = getCountry(home.country);
   const guide = getGuide(dest.code);
   const going = homeC && homeC.code === dest.code;
+  const entrySlot = !guide && !going ? h("div", { class: "guide-entry-wv" }) : null;
 
   const intro = h("div", { class: "guide-head" },
     h("h2", null, `Good to know: ${dest.name}`),
@@ -538,11 +540,11 @@ function guideView(trip) {
   return h("div", { class: "guide stack" }, intro,
     going
       ? guideSec("Entry", h("p", null, `This is your home country, so you won't need a visa. Make sure your passport is valid.`))
-      : visaSection(guide, dest, homeC),
-    guide ? curatedSections(guide, dest) : liveSections(dest));
+      : visaSection(guide, dest, homeC, entrySlot),
+    guideSections(guide, dest, homeC, entrySlot));
 }
 
-function visaSection(guide, dest, homeC) {
+function visaSection(guide, dest, homeC, entrySlot) {
   const v = visaFor(guide, dest.code, homeC?.code);
   const schengen = isSchengen(dest.code);
   const rows = [];
@@ -553,7 +555,7 @@ function visaSection(guide, dest, homeC) {
       ? `We haven't checked the rules for ${homeC ? `${homeC.name} passports` : "your passport"} here, so look your passport up in the official list below.`
       : `We don't have a checked summary for ${dest.name} yet. Check the official sources below for your passport.`));
   }
-  if (schengen) rows.push(h("p", null, SCHENGEN_NOTE.text, " ", ext(SCHENGEN_NOTE.link)));
+  if (schengen && !guide?.visa?.schengen) rows.push(h("p", null, SCHENGEN_NOTE.text, " ", ext(SCHENGEN_NOTE.link)));
   const steps = guide?.visa?.steps ?? [];
   if (steps.length) {
     rows.push(h("h4", null, "Before you go"),
@@ -566,41 +568,100 @@ function visaSection(guide, dest, homeC) {
       { label: "IATA Travel Centre: passport, visa and health rules by nationality", url: "https://www.iatatravelcentre.com/" },
       visaOverviewLink(homeC?.code),
     ]));
+  if (entrySlot) rows.push(entrySlot);
   rows.push(h("p", { class: "small muted guide-note" }, `Checked ${guide ? GUIDES_CHECKED : "against the links above"}. Visa rules depend on your passport and the purpose of your trip, and they change. The official sites have the final say.`));
   return guideSec("Visa and entry", ...rows);
 }
 
-function curatedSections(g, dest) {
-  return [
-    h("div", { class: "guide-grid" },
-      guideSec("Do", bullets(g.dos, "do")),
-      guideSec("Don't", bullets(g.donts, "dont"))),
-    h("div", { class: "guide-grid" },
-      guideSec("Money and tipping", bullets(g.money)),
-      guideSec("Emergency numbers",
-        h("ul", { class: "guide-sos" }, g.emergency.map(([label, n]) =>
-          h("li", null, h("span", null, label), h("a", { class: "num", href: `tel:${n.split(" ")[0].replace(/[^\d+]/g, "")}` }, n)))),
-        h("h4", null, "Plugs and power"), h("p", null, g.plugs))),
-    guideSec("Getting around", bullets(g.transport)),
-    guideSec("More reading", linkList([...g.links, { label: `${dest.name} on Wikivoyage (community travel guide)`, url: wikivoyageUrl(dest.name) }])),
-  ];
+const telHref = (n) => `tel:${n.split(" ")[0].replace(/[^\d+]/g, "")}`;
+const sosList = (rows) => h("ul", { class: "guide-sos" }, rows.map(([label, n]) =>
+  h("li", null, h("span", null, label), h("a", { class: "num", href: telHref(n) }, n))));
+
+let currencyNames = null;
+try { currencyNames = new Intl.DisplayNames(["en"], { type: "currency" }); } catch { /* old browser */ }
+const currencyLine = (code) => code && `Currency: ${(() => { try { return currencyNames?.of(code); } catch { return null; } })() || code} (${code}).`;
+
+/** Plugs line: tailored to the traveller's home plugs when both are in the facts table. */
+function plugsText(dest, homeC, curated) {
+  const df = getFacts(dest.code);
+  const hf = homeC && homeC.code !== dest.code ? getFacts(homeC.code) : null;
+  if (df && hf) return plugAdvice(df, hf, homeC.name);
+  return curated || (df ? plugAdvice(df) : null);
 }
 
-function liveSections(dest) {
-  const box = h("div", { class: "stack", "aria-live": "polite" },
-    h("p", { class: "small muted info-loading" }, `Loading tips for ${dest.name} from Wikivoyage…`));
-  getWikivoyage(dest.name).then((wv) => {
-    if (!wv.sections.length) throw new Error("empty");
-    box.replaceChildren(
-      ...wv.sections.map((s) => guideSec(s.title, ...s.blocks.map((b) => b.type === "p" ? h("p", null, b.text) : bullets(b.items)))),
-      h("p", { class: "small muted" }, "These tips come from ", ext({ url: wv.url }, `Wikivoyage's ${wv.title} guide`),
-        ", written by travellers (CC BY-SA). For entry rules, trust the official sources above."));
-  }).catch(() => {
-    box.replaceChildren(guideSec("More reading",
-      h("p", { class: "small muted" }, "Couldn't load tips right now."),
-      linkList([{ label: `${dest.name} on Wikivoyage (community travel guide)`, url: wikivoyageUrl(dest.name) }])));
-  });
-  return box;
+/** Keep Wikivoyage paragraphs skimmable: whole sentences up to about 320 characters. */
+function shorten(text, limit = 320) {
+  if (text.length <= limit) return text;
+  const sentences = text.match(/[^.!?]+[.!?]+(\s|$)/g) ?? [];
+  let out = "";
+  for (const s of sentences) { if ((out + s).length > limit) break; out += s; }
+  return (out.trim() || `${text.slice(0, limit).replace(/\s+\S*$/, "")}…`);
+}
+
+const AVOID = /^(don['’]t|do not|never|avoid|refrain|it is (considered )?(rude|impolite|offensive))/i;
+
+function wvBlocks(blocks, max = 4) {
+  return blocks.slice(0, max).map((b) => b.type === "p" ? h("p", null, shorten(b.text)) : bullets(b.items.slice(0, 6).map((t) => shorten(t, 240))));
+}
+
+/** Same cards for every country: hand-written where we have a guide, otherwise facts + live Wikivoyage text. */
+function guideSections(g, dest, homeC, entryWv) {
+  const facts = getFacts(dest.code);
+  const sos = g?.emergency ?? emergencyRows(facts);
+  const plugs = plugsText(dest, homeC, g?.plugs);
+  const wvLink = { label: `${dest.name} on Wikivoyage (community travel guide)`, url: wikivoyageUrl(dest.name) };
+
+  // Slots filled from Wikivoyage when there's no hand-written text.
+  const slot = (title, cls) => {
+    const body = h("div", { class: "guide-slot" }, h("p", { class: "small muted info-loading" }, "Loading tips from Wikivoyage…"));
+    return { body, card: guideSec(title, body), cls };
+  };
+  const respect = !g && slot("Respect and etiquette");
+  const moneyWv = !g && h("div", { class: "guide-slot" });
+  const aroundWv = !g && h("div", { class: "guide-slot" });
+  const safe = !g && slot("Stay safe");
+
+  if (!g) {
+    getWikivoyage(dest.name).then((wv) => {
+      const by = Object.fromEntries(wv.sections.map((s) => [s.key, s]));
+      const fill = (el, key, max, empty) => el.replaceChildren(...(by[key] ? wvBlocks(by[key].blocks, max) : empty ? [h("p", { class: "small muted" }, empty)] : []));
+      fill(respect.body, "respect", 5, "Wikivoyage has no etiquette section for this country yet.");
+      // Pull "don't / avoid / never" bullets into their own list so they stand out like the hand-written guides.
+      const avoid = (by.respect?.blocks ?? []).flatMap((b) => b.type === "ul" ? b.items : []).filter((t) => AVOID.test(t));
+      if (avoid.length) {
+        respect.body.querySelectorAll("li").forEach((li) => { if (AVOID.test(li.textContent)) li.remove(); });
+        respect.body.querySelectorAll("ul").forEach((ul) => { if (!ul.children.length) ul.remove(); });
+        respect.body.append(h("h4", null, "Avoid"), bullets(avoid.slice(0, 6).map((t) => shorten(t, 240)), "dont"));
+      }
+      fill(safe.body, "safe", 5, "Wikivoyage has no safety section for this country yet.");
+      fill(moneyWv, "money", 3);
+      fill(aroundWv, "around", 3);
+      if (by.entry) entryWv?.replaceChildren(h("details", { class: "guide-more" }, h("summary", null, "What travellers say about getting in (Wikivoyage)"), ...wvBlocks(by.entry.blocks, 5)));
+      credit.replaceChildren("Etiquette, safety, money and transport tips come from ", ext({ url: wv.url }, `Wikivoyage's ${wv.title} guide`),
+        ", written by travellers (CC BY-SA). For entry rules, trust the official sources above.");
+    }).catch(() => {
+      for (const el of [respect.body, safe.body]) el.replaceChildren(h("p", { class: "small muted" }, "Couldn't load tips right now. ", ext(wvLink, "Read it on Wikivoyage")));
+      moneyWv.replaceChildren(); aroundWv.replaceChildren();
+    });
+  }
+  const credit = h("p", { class: "small muted" });
+
+  const drive = facts && `Traffic drives on the ${facts.drive}.`;
+  return [
+    g ? h("div", { class: "guide-grid" },
+        guideSec("Do", bullets(g.dos, "do")),
+        guideSec("Don't", bullets(g.donts, "dont")))
+      : respect.card,
+    h("div", { class: "guide-grid" },
+      guideSec("Money and tipping", g ? bullets(g.money) : [currencyLine(dest.currency) && h("p", null, currencyLine(dest.currency)), moneyWv]),
+      guideSec("Emergency numbers",
+        sos.length ? sosList(sos) : h("p", { class: "small muted" }, "We haven't checked this country's numbers. 112 works from mobiles in many countries, but confirm locally when you arrive."),
+        plugs && [h("h4", null, "Plugs and power"), h("p", null, plugs)])),
+    guideSec("Getting around", g ? bullets(drive && !g.transport.some((t) => /drives? on the/i.test(t)) ? [...g.transport, drive] : g.transport) : [drive && h("p", null, h("strong", null, drive)), aroundWv]),
+    !g && safe.card,
+    guideSec("More reading", linkList([...(g?.links ?? []), wvLink])),
+    !g && credit,
+  ];
 }
 
 /* ----- live budget summary (right column) ----- */

@@ -414,6 +414,330 @@ export const GUIDES = {
   },
 };
 
+// Schengen countries share the same entry rules; each guide adds its own links.
+const schengenVisa = (name, links, steps = []) => ({
+  general: `${name} is in the Schengen Area. Many nationalities can visit visa-free for up to 90 days in any 180-day period, counted across all Schengen countries together; others need a Schengen visa.`,
+  byHome: { SG: "Singapore passport: visa-free for up to 90 days in any 180-day period across the Schengen Area." },
+  steps: [
+    { text: "At the border, the EU's Entry/Exit System (EES) now takes your fingerprints and photo on your first visit. Allow extra time at passport control." },
+    { text: "ETIAS, a new online travel authorisation for visa-free visitors, is planned but wasn't required yet when we checked. Only use the official EU site if it starts.", link: L("Travel to Europe (official EU site)", "https://travel-europe.europa.eu/") },
+    ...steps,
+  ],
+  links: [...links, L("EU visa policy: who needs a visa", "https://home-affairs.ec.europa.eu/policies/schengen-borders-and-visa/visa-policy_en")],
+  schengen: true,
+});
+
+Object.assign(GUIDES, {
+  ES: {
+    visa: schengenVisa("Spain", [L("Visas (Spanish Ministry of Foreign Affairs)", "https://www.exteriores.gob.es/en/")],
+      [{ text: "Many places, including Barcelona and the Balearic Islands, charge a tourist tax per night. It's added to your hotel bill." }]),
+    dos: [
+      "Eat late like the locals: lunch is around 2 pm and dinner from 9 pm.",
+      "Expect small shops in smaller towns to close for a few hours in the afternoon.",
+      "Greet people with \"Hola\" or \"Buenos días\" when you walk into a shop or bar.",
+      "Book big sights like the Sagrada Família and the Alhambra well ahead; they sell out.",
+    ],
+    donts: [
+      "Watch for pickpockets in busy parts of Barcelona and Madrid, and on the metro.",
+      "Don't walk around town in swimwear. Some beach towns fine people for it.",
+      "Don't drink in the street; many cities fine for it.",
+    ],
+    money: [
+      "Currency: euro (EUR).",
+      "Tipping isn't expected. Rounding up, or 5–10% for good restaurant service, is appreciated.",
+      "Cards are accepted almost everywhere, including contactless.",
+    ],
+    plugs: "Type C and F (two round pins), 230 V.",
+    emergency: [["Emergency (any)", "112"], ["National Police", "091"]],
+    transport: [
+      "Fast AVE and low-cost trains (Ouigo, Iryo) link the big cities; book ahead for the best fares.",
+      "City metros in Madrid and Barcelona are quick and cheap.",
+      "Traffic drives on the right.",
+    ],
+    links: [L("Spain's official tourism site", "https://www.spain.info/en/")],
+  },
+
+  FR: {
+    visa: schengenVisa("France", [L("France-Visas (official)", "https://france-visas.gouv.fr/en/")]),
+    dos: [
+      "Say \"Bonjour\" when you walk into a shop, café or lift, and \"Au revoir\" when you leave.",
+      "Book the Louvre, the Eiffel Tower and other big sights online ahead with a time slot.",
+      "Check opening days: many national museums close one day a week (often Monday or Tuesday).",
+    ],
+    donts: [
+      "Watch for pickpockets on the Paris metro and around big sights.",
+      "Don't expect quick service; waiters won't bring the bill until you ask for it.",
+    ],
+    money: [
+      "Currency: euro (EUR).",
+      "Service is included in the bill (service compris). Leaving small change or rounding up is a kind extra.",
+      "Contactless cards work almost everywhere.",
+    ],
+    plugs: "Type C and E (two round pins), 230 V.",
+    emergency: [["Emergency (any)", "112"], ["Medical (SAMU)", "15"], ["Police", "17"], ["Fire", "18"]],
+    transport: [
+      "TGV high-speed trains link Paris with most cities; book early on SNCF Connect for cheaper fares.",
+      "In Paris, tap a Navigo Easy card, or buy tickets in the RATP app.",
+      "Motorways have tolls; traffic drives on the right.",
+    ],
+    links: [L("France's official tourism site", "https://www.france.fr/en/")],
+  },
+
+  IT: {
+    visa: schengenVisa("Italy", [L("Visa for Italy (Ministry of Foreign Affairs)", "https://vistoperitalia.esteri.it/home/en")],
+      [{ text: "Visiting Venice for the day? On peak days there's an access fee; check if your date needs one.", link: L("Venice access fee (City of Venice)", "https://cda.ve.it/en/") }]),
+    dos: [
+      "Cover shoulders and knees in churches, including St Peter's and the Vatican Museums.",
+      "Validate paper bus and regional train tickets in the machine before you travel, or you can be fined.",
+      "Book the Colosseum, the Last Supper and the Uffizi well ahead.",
+    ],
+    donts: [
+      "Don't sit on the Spanish Steps in Rome or paddle in fountains; both can bring fines.",
+      "Don't drive into a ZTL (limited traffic zone) in city centres. Cameras fine you automatically.",
+      "Watch for pickpockets on busy buses and at big sights.",
+    ],
+    money: [
+      "Currency: euro (EUR).",
+      "Tipping isn't expected. Many restaurants add a small cover charge (coperto) per person.",
+      "Carry some cash for small cafés and markets.",
+    ],
+    plugs: "Type C, F and L (round pins), 230 V.",
+    emergency: [["Emergency (any)", "112"]],
+    transport: [
+      "Frecciarossa and Italo high-speed trains link the big cities; book early for cheaper fares.",
+      "Coffee at the bar is cheaper than sitting down at a table.",
+      "Traffic drives on the right.",
+    ],
+    links: [L("Italy's official tourism site", "https://www.italia.it/en")],
+  },
+
+  DE: {
+    visa: schengenVisa("Germany", [L("Visa information (Federal Foreign Office)", "https://www.auswaertiges-amt.de/en")]),
+    dos: [
+      "Carry some cash; smaller cafés, bakeries and market stalls may not take cards.",
+      "Return bottles marked Pfand to the machines in supermarkets to get your deposit back.",
+      "Plan around Sundays: most shops are closed.",
+    ],
+    donts: [
+      "Don't walk in bike lanes (usually red or marked on the pavement).",
+      "Don't cross on a red pedestrian light, even when the road is empty.",
+      "Keep noise down at night and on Sundays, which are quiet days.",
+    ],
+    money: [
+      "Currency: euro (EUR).",
+      "Round up or add 5–10% at restaurants, and say the total to the server when you pay instead of leaving it on the table.",
+    ],
+    plugs: "Type C and F (two round pins), 230 V.",
+    emergency: [["Ambulance and fire", "112"], ["Police", "110"]],
+    transport: [
+      "Deutsche Bahn trains go everywhere; Sparpreis fares booked early are much cheaper.",
+      "The Deutschlandticket covers local and regional transport nationwide for a monthly price.",
+      "Traffic drives on the right.",
+    ],
+    links: [L("Germany's official tourism site", "https://www.germany.travel/en/")],
+  },
+
+  CH: {
+    visa: schengenVisa("Switzerland", [L("Entry and visas (State Secretariat for Migration)", "https://www.sem.admin.ch/sem/en/home.html")]),
+    dos: [
+      "Look at the Swiss Travel Pass or a Half Fare Card if you'll take several trains, boats or mountain lifts.",
+      "Check mountain weather before going up; it changes quickly.",
+    ],
+    donts: [
+      "Don't expect shops to be open on Sundays.",
+      "Don't pay in euros if you can avoid it; you'll get a poor rate and change in francs.",
+    ],
+    money: [
+      "Currency: Swiss franc (CHF), not the euro.",
+      "Service is included in prices; rounding up is a kind extra.",
+      "Switzerland is expensive. Supermarkets (Coop, Migros) are good for cheaper meals.",
+    ],
+    plugs: "Type J (three round pins), 230 V. Type C two-pin plugs also fit.",
+    emergency: [["Emergency (any)", "112"], ["Police", "117"], ["Ambulance", "144"], ["Fire", "118"]],
+    transport: [
+      "Trains are punctual and connect almost everywhere; the SBB app has all timetables and tickets.",
+      "Driving on motorways needs a vignette sticker (or e-vignette).",
+    ],
+    links: [L("Switzerland Tourism", "https://www.myswitzerland.com/en/")],
+  },
+
+  NL: {
+    visa: schengenVisa("The Netherlands", [L("Visas (Netherlands Worldwide)", "https://www.netherlandsworldwide.nl/")]),
+    dos: [
+      "Tap your contactless bank card in and out on trains, trams and buses.",
+      "Look both ways for bikes before stepping off the pavement.",
+    ],
+    donts: [
+      "Don't walk in bike lanes.",
+      "Don't smoke cannabis in public in Amsterdam's red-light district; it's banned there.",
+      "Don't take photos of people in the red-light district windows.",
+    ],
+    money: [
+      "Currency: euro (EUR).",
+      "Tipping isn't expected; round up or leave 5–10% for good service.",
+      "Some places are card only and don't take cash.",
+    ],
+    plugs: "Type C and F (two round pins), 230 V.",
+    emergency: [["Emergency (any)", "112"]],
+    transport: [
+      "Trains (NS) run often between all major cities.",
+      "Hiring a bike is the local way to get around.",
+    ],
+    links: [L("Holland's official tourism site", "https://www.holland.com/global/tourism")],
+  },
+
+  TR: {
+    visa: {
+      general: "Many nationalities can visit Türkiye visa-free, usually for up to 90 days in 180; some need an e-Visa from the official site.",
+      byHome: { SG: "Singapore passport: visa-free for up to 90 days in any 180-day period." },
+      steps: [{ text: "If you need an e-Visa, apply only on the official site.", link: L("Türkiye e-Visa (official)", "https://www.evisa.gov.tr/en/") }],
+      links: [L("Visa information (Ministry of Foreign Affairs)", "https://www.mfa.gov.tr/")],
+    },
+    dos: [
+      "Cover shoulders and knees in mosques, and women should bring a headscarf. Take your shoes off at the door.",
+      "Bargain in bazaars; it's expected.",
+      "Accept tea when it's offered; it's part of the welcome.",
+    ],
+    donts: [
+      "Don't insult Atatürk, the flag or the nation. It's a crime.",
+      "Avoid visiting mosques during prayer times.",
+    ],
+    money: [
+      "Currency: Turkish lira (TRY). Prices change often because of inflation.",
+      "Tip about 10% in restaurants.",
+    ],
+    plugs: "Type C and F (two round pins), 230 V.",
+    emergency: [["Emergency (any)", "112"]],
+    transport: [
+      "In Istanbul, get an Istanbulkart for the metro, trams, buses and ferries.",
+      "Domestic flights and long-distance buses are cheap ways to cover big distances.",
+    ],
+    links: [L("Go Türkiye (official tourism site)", "https://goturkiye.com/")],
+  },
+
+  NZ: {
+    visa: {
+      general: "Visitors from visa-waiver countries need an NZeTA (with the tourist levy) before travelling to New Zealand. Others need a visa.",
+      byHome: { SG: "Singapore passport: no visa needed for visits of up to 3 months, but you must get an NZeTA before you travel." },
+      steps: [
+        { text: "Apply for the NZeTA on the official app or website at least 72 hours before you fly.", link: L("NZeTA (Immigration New Zealand)", "https://www.immigration.govt.nz/") },
+        { text: "Declare all food, and clean hiking boots and camping gear. Biosecurity is strict and fines are instant.", link: L("What you can bring (Biosecurity NZ)", "https://www.mpi.govt.nz/") },
+      ],
+      links: [L("New Zealand Customs: arriving in NZ", "https://www.customs.govt.nz/")],
+    },
+    dos: [
+      "Check mountain and road conditions before hikes and long drives; weather changes fast.",
+      "Use sunscreen; the UV is very strong.",
+      "Drive on the left, and allow more time than the map says on winding roads.",
+    ],
+    donts: [
+      "Don't leave valuables in your car at trailheads and car parks.",
+      "Don't skip the food declaration at the airport.",
+    ],
+    money: [
+      "Currency: New Zealand dollar (NZD).",
+      "Tipping isn't expected.",
+    ],
+    plugs: "Type I (two angled flat pins), 230 V.",
+    emergency: [["Police, ambulance and fire", "111"]],
+    transport: [
+      "Renting a car or campervan is the easiest way to see the country.",
+      "Domestic flights link the North and South Islands; the Interislander ferry is the scenic option.",
+    ],
+    links: [L("New Zealand's official tourism site", "https://www.newzealand.com/")],
+  },
+
+  PH: {
+    visa: {
+      general: "Many nationalities can visit the Philippines visa-free, usually for 30 days or more depending on the passport.",
+      byHome: { SG: "Singapore passport: visa-free for up to 30 days." },
+      steps: [{ text: "Register on eTravel within 72 hours before you arrive. It's free on the official site.", link: L("eTravel (official)", "https://etravel.gov.ph/") }],
+      links: [L("Bureau of Immigration", "https://immigration.gov.ph/")],
+    },
+    dos: [
+      "Carry cash for islands and small towns, where cards often don't work.",
+      "Check the weather for island hopping; typhoon season is roughly June to November.",
+      "Use Grab in cities.",
+    ],
+    donts: [
+      "Don't carry any drugs. Penalties are severe.",
+      "Don't lose your temper in public; staying calm gets better results.",
+    ],
+    money: [
+      "Currency: Philippine peso (PHP).",
+      "Restaurants often add a 10% service charge; otherwise a small tip is appreciated.",
+    ],
+    plugs: "Type A, B and C, 220 V. Check your devices handle 220 V.",
+    emergency: [["Police, ambulance and fire", "911"]],
+    transport: [
+      "Domestic flights are the quickest way between islands; ferries are cheaper but slower.",
+      "Manila traffic is heavy, so leave plenty of time for the airport.",
+    ],
+    links: [L("Philippines' official tourism site", "https://philippines.travel/")],
+  },
+
+  IN: {
+    visa: {
+      general: "Most visitors need a visa for India. Many nationalities can apply online for an e-Visa.",
+      byHome: { SG: "Singapore passport: you need a visa. Apply for an e-Visa (e-Tourist Visa) online before you travel." },
+      steps: [{ text: "Apply for the e-Visa only on the official government site; many lookalike sites charge more.", link: L("Indian e-Visa (official)", "https://indianvisaonline.gov.in/evisa/") }],
+      links: [L("Bureau of Immigration, India", "https://boi.gov.in/")],
+    },
+    dos: [
+      "Dress modestly, and take your shoes off at temples and homes.",
+      "Use your right hand to give, take or eat.",
+      "Drink bottled or filtered water.",
+      "Use Uber or Ola, or agree auto-rickshaw fares before you get in.",
+    ],
+    donts: [
+      "Avoid public displays of affection.",
+      "Don't touch people's heads or point your feet at people or shrines.",
+    ],
+    money: [
+      "Currency: Indian rupee (INR).",
+      "Tip about 10% in restaurants if there's no service charge.",
+      "UPI phone payments are everywhere; carry cash for small purchases.",
+    ],
+    plugs: "Type C, D and M, 230 V.",
+    emergency: [["Emergency (any)", "112"]],
+    transport: [
+      "Book trains early on IRCTC; popular routes sell out.",
+      "Domestic flights are good value for long distances.",
+    ],
+    links: [L("Incredible India (official tourism site)", "https://www.incredibleindia.gov.in/")],
+  },
+
+  AE: {
+    visa: {
+      general: "Some nationalities get a free visa on arrival in the UAE; others must apply before travelling.",
+      byHome: { SG: "Singapore passport: free visa on arrival for up to 30 days." },
+      steps: [{ text: "Some prescription and over-the-counter medicines are controlled in the UAE. Check before you pack medicines.", link: L("UAE government portal", "https://u.ae/en") }],
+      links: [L("Federal Authority for Identity and Citizenship (ICP)", "https://icp.gov.ae/en/")],
+    },
+    dos: [
+      "Dress modestly in malls, souks and government buildings.",
+      "During Ramadan, avoid eating, drinking or smoking in public in the daytime.",
+      "Use the Dubai Metro with a Nol card; there are women-and-children carriages.",
+    ],
+    donts: [
+      "Don't take photos of people without asking; privacy laws are strict.",
+      "Don't drink alcohol outside licensed venues or be drunk in public.",
+      "Avoid public displays of affection and rude gestures, including online.",
+    ],
+    money: [
+      "Currency: UAE dirham (AED).",
+      "Restaurants may add a service charge; otherwise about 10% is appreciated.",
+    ],
+    plugs: "Type G (three square pins, same as Singapore), 230 V.",
+    emergency: [["Police", "999"], ["Ambulance", "998"], ["Fire", "997"]],
+    transport: [
+      "Taxis are metered; Careem and Uber also work.",
+      "Summer (June to September) is extremely hot, so plan outdoor time for mornings and evenings.",
+    ],
+    links: [L("Visit Dubai (official)", "https://www.visitdubai.com/en"), L("Visit Abu Dhabi (official)", "https://visitabudhabi.ae/en")],
+  },
+});
+
 // Schengen members get a short note on the shared rules (and fall back to
 // Wikivoyage for the rest).
 const SCHENGEN = new Set("AT BE BG CH CZ DE DK EE ES FI FR GR HR HU IS IT LI LT LU LV MT NL NO PL PT RO SE SI SK".split(" "));
@@ -481,6 +805,7 @@ const WANTED = [
   { key: "respect", title: "Respect and etiquette", match: /^respect$/i, level: 1 },
   { key: "safe", title: "Stay safe", match: /^stay safe$/i, level: 1 },
   { key: "money", title: "Money", match: /^(money|tipping)$/i, level: 2 },
+  { key: "around", title: "Getting around", match: /^get around$/i, level: 1 },
 ];
 
 /** From a MediaWiki section list, the sections to fetch: [{ key, title, index }]. */

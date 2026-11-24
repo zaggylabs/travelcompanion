@@ -378,7 +378,7 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 /* "Good to know" tab */
 .guide-head h2 { margin: 0 0 4px; }
 .guide-head p { margin: 0; max-width: 70ch; }
-.guide-sec { padding: 16px; display: grid; gap: 8px; min-width: 0; }
+.guide-sec { padding: 16px; display: grid; gap: 8px; min-width: 0; align-content: start; }
 .guide-sec h3 { margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--subtle); }
 .guide-sec h4 { margin: 6px 0 0; font-size: 0.9rem; }
 .guide-sec p { margin: 0; font-size: 0.92rem; }
@@ -517,3 +517,8 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 .base-other { flex: 1 1 200px; max-width: 320px; }
 .base-other input { padding: 3px 10px; font-size: 0.85rem; }
 @media (max-width: 560px) { .base-row { grid-template-columns: 1fr; gap: 4px; } }
+.guide-slot { display: grid; gap: 8px; }
+.guide-slot:empty { display: none; }
+.guide-more { font-size: 0.9rem; border-top: 1px solid var(--line); padding-top: 8px; }
+.guide-more summary { cursor: pointer; font-weight: 550; }
+.guide-more > *:not(summary) { margin-top: 8px; }

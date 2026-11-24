@@ -49,3 +49,17 @@ test("pickSections finds the useful Wikivoyage sections", () => {
   assert.deepEqual(pickSections(sections).map((s) => [s.key, s.index]), [["entry", "6"], ["respect", "20"], ["safe", "21"], ["money", "11"]]);
   assert.deepEqual(pickSections([]), []);
 });
+
+test("country facts: plugs, emergency numbers, driving side", async () => {
+  const { getFacts, emergencyRows, plugAdvice } = await import("../assets/js/lib/countryfacts.js");
+  const es = getFacts("es"), sg = getFacts("SG"), jp = getFacts("JP"), gb = getFacts("GB");
+  assert.equal(es.drive, "right");
+  assert.equal(gb.drive, "left");
+  assert.deepEqual(emergencyRows(es), [["Police, ambulance and fire", "112"]]);
+  assert.deepEqual(emergencyRows(sg), [["Police", "999"], ["Ambulance and fire", "995"]]);
+  assert.deepEqual(emergencyRows(getFacts("MZ")), []);
+  assert.match(plugAdvice(es, sg, "Singapore"), /Types C and F, 230 V\. Plugs from Singapore \(Type G\) need an adapter\.$/);
+  assert.match(plugAdvice(gb, sg, "Singapore"), /Plugs from Singapore fit\./);
+  assert.match(plugAdvice(jp, sg, "Singapore"), /voltage is different/);
+  for (const code of Object.keys((await import("../assets/js/lib/guides.js")).GUIDES)) assert.ok(getFacts(code), `facts for ${code}`);
+});
