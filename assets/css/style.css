@@ -567,3 +567,25 @@ form[data-mode="manual"] .link-field, form[data-mode="manual"] .details-label { 
 .add-row { display: flex; flex-wrap: wrap; gap: 4px; }
 .travel-day { margin: -4px 0 6px; color: var(--accent); font-weight: 600; }
 .check.next-day { margin-top: -4px; }
+
+/* Home page: hero, new trip, saved trips */
+.home .hero { text-align: center; padding: 24px 0 4px; }
+.home .hero h1 { margin: 0 0 6px; font-size: clamp(1.7rem, 4.5vw, 2.4rem); letter-spacing: -0.01em; }
+.home .hero p { margin: 0 auto; max-width: 52ch; }
+.new-trip { max-width: 760px; margin-left: auto; margin-right: auto; }
+.new-trip.open { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.new-trip-btn {
+  display: flex; align-items: center; gap: 14px; width: 100%; padding: 18px 20px; text-align: left;
+  border: 0; border-radius: var(--radius); background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.new-trip-btn:hover { background: var(--accent-soft); }
+.new-trip-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.new-trip-btn > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.new-trip-btn strong { font-size: 1.1rem; }
+.new-trip-plus {
+  display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 1.5rem; line-height: 1;
+}
+.stack-sm > h2 { margin: 0 0 10px; font-size: 1.1rem; }
+.trip-grid.past .trip-card { opacity: 0.75; }
+.trip-grid.past .trip-card:hover { opacity: 1; }

@@ -264,38 +264,50 @@ function homeCard(firstRun) {
 
 /* ----- trip list ----- */
 
+function tripCard(t) {
+  const days = daysBetween(t.startDate, t.endDate).length;
+  const s = summarize(t, days);
+  return h("li", null, h("button", { class: "trip-card", type: "button", onclick: () => openTrip(t.id) },
+    h("strong", null, t.name),
+    h("span", { class: "muted" }, placeLine(t) || "No destination yet"),
+    h("span", { class: "small muted" }, t.startDate && t.endDate
+      ? `${formatDay(t.startDate)} to ${formatDay(t.endDate)} · ${plural(days, "day")}`
+      : "Dates not set"),
+    h("span", { class: "small muted" },
+      `${plural(t.items.length, "plan")} · ${formatMoney(s.totalProjected, t.currency)}`,
+      s.totalBudget > 0 ? ` of ${formatMoney(s.totalBudget, t.currency)}` : "",
+      s.totalProjected > 0 && homeText(s.totalProjected, t.currency) ? ` (${homeText(s.totalProjected, t.currency)})` : "")));
+}
+
+// Home page, top to bottom: an invitation to plan, the new-trip card, then your saved trips.
 function tripList(trips, homeShowing) {
   const creating = !homeShowing && (ui.creatingTrip ?? trips.length === 0);
-  const sorted = [...trips].sort((a, b) => (a.startDate || "9999").localeCompare(b.startDate || "9999"));
-  return h("div", { class: "stack" },
-    h("div", { class: "page-head" },
-      h("div", null,
-        h("h1", null, "Your trips"),
-        h("p", { class: "muted" }, "Plan each day, track what it costs, and ditch the spreadsheet.")),
-      !creating && h("button", { class: "btn primary", type: "button", onclick: () => { ui.creatingTrip = true; render(); } }, "+ New trip")),
-    creating && h("section", { class: "card pad" },
-      h("h2", null, "New trip"),
-      tripForm(emptyTrip(), "Create trip", (t) => {
-        saveTrip(t);
-        ui.creatingTrip = false;
-        openTrip(t.id);
-      }, trips.length ? () => { ui.creatingTrip = false; render(); } : null)),
-    sorted.length
-      ? h("ul", { class: "trip-grid" }, sorted.map((t) => {
-          const days = daysBetween(t.startDate, t.endDate).length;
-          const s = summarize(t, days);
-          return h("li", null, h("button", { class: "trip-card", type: "button", onclick: () => openTrip(t.id) },
-            h("strong", null, t.name),
-            h("span", { class: "muted" }, placeLine(t) || "No destination yet"),
-            h("span", { class: "small muted" }, t.startDate && t.endDate
-              ? `${formatDay(t.startDate)} to ${formatDay(t.endDate)} · ${plural(days, "day")}`
-              : "Dates not set"),
-            h("span", { class: "small muted" },
-              `${plural(t.items.length, "plan")} · ${formatMoney(s.totalProjected, t.currency)}`,
-              s.totalBudget > 0 ? ` of ${formatMoney(s.totalBudget, t.currency)}` : "",
-              s.totalProjected > 0 && homeText(s.totalProjected, t.currency) ? ` (${homeText(s.totalProjected, t.currency)})` : "")));
-        }))
-      : !creating && h("p", { class: "card pad center muted" }, "No trips yet. Create one to get started."));
+  const today = new Date().toISOString().slice(0, 10);
+  const isPast = (t) => Boolean(t.endDate) && t.endDate < today;
+  const upcoming = trips.filter((t) => !isPast(t)).sort((a, b) => (a.startDate || "9999").localeCompare(b.startDate || "9999"));
+  const past = trips.filter(isPast).sort((a, b) => b.endDate.localeCompare(a.endDate));
+  const start = () => { ui.creatingTrip = true; render(); };
+
+  return h("div", { class: "stack home" },
+    h("header", { class: "hero" },
+      h("h1", null, trips.length ? "Plan your next holiday" : "Plan your holiday"),
+      h("p", { class: "muted" }, "Pick a country, your cities and dates, and we'll help you plan every day and keep track of what it costs. No spreadsheet needed.")),
+    h("section", { class: `card new-trip${creating ? " pad open" : ""}`, "aria-label": "New trip" }, creating
+      ? [h("h2", null, "Plan a new trip"),
+         tripForm(emptyTrip(), "Create trip", (t) => {
+           saveTrip(t);
+           ui.creatingTrip = false;
+           openTrip(t.id);
+         }, trips.length ? () => { ui.creatingTrip = false; render(); } : null)]
+      : h("button", { class: "new-trip-btn", type: "button", onclick: start },
+          h("span", { class: "new-trip-plus", "aria-hidden": "true" }, "+"),
+          h("span", null, h("strong", null, "Plan a new trip"), h("span", { class: "small muted" }, "Country, cities and dates, one step at a time")))),
+    upcoming.length > 0 && h("section", { class: "stack-sm" },
+      h("h2", null, past.length ? "Upcoming trips" : "Your trips"),
+      h("ul", { class: "trip-grid" }, upcoming.map(tripCard))),
+    past.length > 0 && h("section", { class: "stack-sm" },
+      h("h2", null, "Past trips"),
+      h("ul", { class: "trip-grid past" }, past.map(tripCard))));
 }
 
 // Windows has no flag emoji (it shows the letters "JP"), so only use flags where they draw in colour.
