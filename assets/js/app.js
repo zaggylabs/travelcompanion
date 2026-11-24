@@ -2349,7 +2349,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       },
       emptyText: () => "No airport matches that. Try the city or the 3-letter code.",
     });
-    return field(label, box.el, "span-3");
+    return field(label, box.el);
   }
   const readAirports = (f) => {
     const out = {};
@@ -2360,18 +2360,28 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     }
     return out;
   };
+  const dayField = (cls) => field("Day", useSelect
+    ? h("select", { name: "date" },
+        h("option", { value: "", selected: item.date === "" }, "Unscheduled"),
+        days.map((d, i) => h("option", { value: d, selected: d === item.date }, `Day ${i + 1} · ${formatDay(d)}`)))
+    : h("input", { name: "date", type: "date", value: item.date }), cls);
+  const routeRow = (a, b) => h("div", { class: "route-row span-all" }, a, h("span", { class: "route-arrow", "aria-hidden": "true" }, "→"), b);
   const travelFields = isTravel ? [
     // Home is always offered (it's usually where the first flight leaves from), then the trip's countries and cities.
     h("datalist", { id: placesList }, [...new Set([homeName, ...ccs.map((c) => getCountry(c)?.name), ...tripCities(trip).map((c) => c.name)].filter(Boolean))].map((n) => h("option", { value: n }))),
+    // Day | By | number, then From → To side by side (airports the same way), then the times.
+    dayField(isFlight ? "span-3 pair" : "span-2"),
     isFlight ? modeSelect : field("By", modeSelect, "span-2"),
-    field("From", h("input", { name: "from", list: placesList, value: t.from ?? "", placeholder: homeName ? `e.g. ${homeName}` : "e.g. Singapore" }), "span-2"),
-    field("To", h("input", { name: "to", list: placesList, value: t.to ?? "", placeholder: "A country or city, e.g. Japan" }), "span-2"),
-    isFlight && airportField("fromAirport", "From airport", t.fromAirport, "fromAirportName", t.fromAirportName, "from"),
-    isFlight && airportField("toAirport", "To airport", t.toAirport, "toAirportName", t.toAirportName, "to"),
-    field(isFlight ? "Flight no." : "Train or bus no.", h("input", { name: "number", value: t.number ?? "", placeholder: "Optional" }), "span-2"),
-    field("Departs", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
-    field("Arrives", h("input", { name: "arrive", type: "time", value: t.arrive ?? "" }), "span-1"),
-    h("label", { class: "check span-all next-day" }, h("input", { type: "checkbox", name: "nextDay", checked: Boolean(t.nextDay) }), h("span", null, "Arrives the next day")),
+    field(isFlight ? "Flight no." : "Train or bus no.", h("input", { name: "number", value: t.number ?? "", placeholder: "Optional" }), isFlight ? "span-3 pair" : "span-2"),
+    routeRow(
+      field("From", h("input", { name: "from", list: placesList, value: t.from ?? "", placeholder: homeName ? `e.g. ${homeName}` : "e.g. Singapore" })),
+      field("To", h("input", { name: "to", list: placesList, value: t.to ?? "", placeholder: "A country or city, e.g. Japan" }))),
+    isFlight && routeRow(
+      airportField("fromAirport", "From airport", t.fromAirport, "fromAirportName", t.fromAirportName, "from"),
+      airportField("toAirport", "To airport", t.toAirport, "toAirportName", t.toAirportName, "to")),
+    field("Departs", h("input", { name: "time", type: "time", value: item.time }), "span-2"),
+    field("Arrives", h("input", { name: "arrive", type: "time", value: t.arrive ?? "" }), "span-2"),
+    h("label", { class: "check span-2 next-day wide" }, h("input", { type: "checkbox", name: "nextDay", checked: Boolean(t.nextDay) }), h("span", null, "Arrives the next day")),
   ] : [];
 
   // Changing to or from Flights / Transport redraws the form in the other layout, keeping what's been typed.
@@ -2405,17 +2415,12 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     next.querySelector(travel ? "input[name=from]" : "input[name=title]")?.focus();
   };
 
-  const form = h("form", { class: "card pad form-grid six editing" },
+  const form = h("form", { class: `card pad form-grid six editing${isTravel ? " travel" : ""}` },
     field(isTravel ? "Name" : "Title", titleInput, "span-4"),
     field("Category", categorySelect, "span-2"),
     !isTravel && field("Place", placeBox.el, "span-3"),
     !isTravel && field("Where", locationInput, "span-3"),
-    field("Day", useSelect
-      ? h("select", { name: "date" },
-          h("option", { value: "", selected: item.date === "" }, "Unscheduled"),
-          days.map((d, i) => h("option", { value: d, selected: d === item.date }, `Day ${i + 1} · ${formatDay(d)}`)))
-      : h("input", { name: "date", type: "date", value: item.date }), "span-2"),
-    isTravel ? travelFields : field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
+    isTravel ? travelFields : [dayField("span-2"), field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1")],
     costInput.el,
     field("Currency", currencySelect, "span-1"),
     field("Link", linkInput, "span-all"),

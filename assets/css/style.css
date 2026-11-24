@@ -591,7 +591,24 @@ form[data-mode="manual"] .link-field, form[data-mode="manual"] .details-label { 
 
 /* Flight / transport plans */
 .travel-day { margin: -4px 0 6px; color: var(--accent); font-weight: 600; }
-.check.next-day { margin-top: -4px; }
+.check.next-day { align-self: end; min-height: 34px; }
+/* From → To (and the two airports) sit side by side with an arrow between, phones too. */
+.route-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: end; }
+.route-arrow { padding-bottom: 7px; color: var(--accent); font-weight: 700; font-size: 1.1rem; }
+@container (max-width: 640px) { .trip-main .span-3.pair { grid-column: span 1; } }
+/* On phones the travel form keeps its pairs (Day | no., From → To, Departs | Arrives, Cost | Currency) two to a row. */
+@container (max-width: 420px) {
+  .trip-main .form-grid.six.travel { grid-template-columns: 1fr 1fr; }
+  .trip-main .travel > .span-1, .trip-main .travel > .span-2, .trip-main .travel > .span-3.pair { grid-column: span 1; }
+  .trip-main .travel > .wide, .trip-main .travel > .span-4 + .span-2 { grid-column: 1 / -1; }
+  .trip-main .route-row { gap: 6px; }
+}
+@media (max-width: 640px) {
+  .form-grid.six.travel { grid-template-columns: 1fr 1fr; }
+  .travel > .span-1, .travel > .span-2, .travel > .span-3.pair { grid-column: span 1; }
+  .travel > .wide, .travel > .span-4 + .span-2 { grid-column: 1 / -1; }
+  .route-row { gap: 6px; }
+}
 
 /* Home page: hero, new trip, saved trips */
 .home .hero { text-align: center; padding: 24px 0 4px; }
