@@ -83,11 +83,17 @@ function loadRates() {
   });
 }
 
-// Don't rebuild the page under someone who's typing; the summary can still update in place.
-function refreshAfterRates() {
+/** Someone is typing or has a form open, so rebuilding the page now would wipe what they've entered. */
+function formBusy() {
   const typing = root.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
   const draftIdea = Boolean(root.querySelector(".ideas-add input[name=title]")?.value);
-  if (!typing && !ui.editingItem && !ui.editingTrip && !ui.editingIdea && !ui.schedulingIdea && !draftIdea) return render();
+  const newTrip = Boolean(root.querySelector("form.trip-form"));
+  return typing || newTrip || draftIdea || Boolean(ui.editingItem || ui.editingTrip || ui.editingIdea || ui.schedulingIdea || ui.editingBase);
+}
+
+// Don't rebuild the page under someone who's typing; the summary can still update in place.
+function refreshAfterRates() {
+  if (!formBusy()) return render();
   const trip = loadTrips().find((t) => t.id === currentTripId());
   if (trip && activeSummary?.box.isConnected) activeSummary.update(trip);
 }
@@ -147,8 +153,11 @@ function updateHomeButton() {
 homeBtn?.addEventListener("click", () => { ui.homeOpen = true; render(); window.scrollTo({ top: 0 }); });
 
 // Wide screens get three columns (place info | itinerary | budget); narrower ones show the info under the selected plan.
+// Resizing (or turning a phone) mid-form waits until the form is done, so nothing typed is lost.
 const WIDE = window.matchMedia("(min-width: 960px)");
-WIDE.addEventListener("change", () => render());
+let layoutPending = false;
+WIDE.addEventListener("change", () => { if (formBusy()) layoutPending = true; else render(); });
+document.addEventListener("focusout", () => setTimeout(() => { if (layoutPending && !formBusy()) render(); }, 0));
 
 function currentTripId() {
   const m = location.hash.match(/^#trip\/(.+)$/);
@@ -189,6 +198,7 @@ const sortItems = (items) => [...items].sort(byTime);
 const root = document.getElementById("app");
 
 function render() {
+  layoutPending = false;
   revokeFileUrls();
   const trips = loadTrips();
   const id = currentTripId();

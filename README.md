@@ -23,6 +23,8 @@ Live: https://travelcompanion.pages.dev
 
 ## How the site works
 
+See [CODEMAP.md](CODEMAP.md) for a quick map of the code, data model and storage keys.
+
 It's a plain static site: HTML, CSS and JavaScript modules with **no build step**. Cloudflare Pages serves the repo root, and every push to `main` goes live in about a minute.
 
 ```
