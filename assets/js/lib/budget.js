@@ -10,7 +10,19 @@ export const isPaid = (item) => item.paid ?? (item.actualCost !== null && item.a
 /** What ticking (or unticking) "paid" does to a plan: an empty actual cost takes the estimate. */
 export const setPaid = (item, paid) => ({ ...item, paid, actualCost: paid && (item.actualCost === null || item.actualCost === undefined) ? item.estimatedCost || 0 : item.actualCost });
 
-export function summarizeBudget(trip, dayCount) {
+/** The currency a plan's costs are in. Plans without one are in the trip's currency. */
+export const itemCurrency = (item, trip) => item.currency || trip.currency;
+
+const sameOnly = (amount, from, to) => (from === to ? amount : null);
+
+/**
+ * Totals for the budget, all in the trip's currency (`trip.currency`).
+ * Plans can be in other currencies (a multi-country trip, or a flight paid at home):
+ * `convert(amount, from, to)` turns them into the trip's currency, and returns null
+ * when there's no rate. Those plans are left out of the totals and listed in `unconverted`.
+ * `byCurrency` has each currency's expected total in its own money, for "made up of" lines.
+ */
+export function summarizeBudget(trip, dayCount, convert = sameOnly) {
   const byDay = {};
   const categories = CATEGORIES.map((category) => ({
     category,
@@ -21,13 +33,24 @@ export function summarizeBudget(trip, dayCount) {
   }));
   const byCat = new Map(categories.map((c) => [c.category, c]));
 
+  const byCurrency = {};
+  const unconverted = new Set();
   for (const item of trip.items) {
+    const cur = itemCurrency(item, trip);
+    const exp = expectedCost(item);
+    const rate = cur === trip.currency ? 1 : convert(1, cur, trip.currency);
+    if (exp > 0 || item.estimatedCost > 0) byCurrency[cur] = (byCurrency[cur] ?? 0) + exp;
+    if (rate === null || rate === undefined || !Number.isFinite(rate)) {
+      if (exp > 0 || item.estimatedCost > 0) unconverted.add(cur);
+      continue;
+    }
     const row = byCat.get(item.category) ?? byCat.get("Other");
-    row.planned += item.estimatedCost || 0;
-    row.spent += isPaid(item) ? expectedCost(item) : 0;
-    row.projected += expectedCost(item);
-    byDay[item.date] = (byDay[item.date] ?? 0) + expectedCost(item);
+    row.planned += (item.estimatedCost || 0) * rate;
+    row.spent += isPaid(item) ? exp * rate : 0;
+    row.projected += exp * rate;
+    byDay[item.date] = (byDay[item.date] ?? 0) + exp * rate;
   }
+  for (const k of Object.keys(byCurrency)) byCurrency[k] = round2(byCurrency[k]);
   for (const c of categories) {
     c.planned = round2(c.planned);
     c.spent = round2(c.spent);
@@ -48,5 +71,7 @@ export function summarizeBudget(trip, dayCount) {
     projectedPerPerson: round2(totalProjected / Math.max(1, trip.travelers || 1)),
     projectedPerDay: dayCount > 0 ? round2(totalProjected / dayCount) : null,
     byDay,
+    byCurrency,
+    unconverted: [...unconverted],
   };
 }

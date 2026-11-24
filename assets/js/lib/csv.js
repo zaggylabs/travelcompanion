@@ -38,14 +38,15 @@ export function toCsv(rows) {
   return rows.map((r) => r.map((c) => escapeCell(String(c))).join(",")).join("\r\n") + "\r\n";
 }
 
-export const EXPORT_HEADERS = ["Date", "Time", "Title", "Location", "Category", "Estimated cost", "Actual cost", "Notes", "Link"];
+export const EXPORT_HEADERS = ["Date", "Time", "Title", "Location", "Category", "Estimated cost", "Actual cost", "Currency", "Notes", "Link"];
 
-export function itemsToCsv(items) {
+/** `currency` is the trip's: plans without their own currency are written with it. */
+export function itemsToCsv(items, currency = "") {
   const sorted = [...items].sort((a, b) =>
     (a.date || "9999").localeCompare(b.date || "9999") || a.time.localeCompare(b.time));
   return toCsv([
     EXPORT_HEADERS,
-    ...sorted.map((i) => [i.date, i.time, i.title, i.location, i.category, i.estimatedCost, i.actualCost ?? "", i.notes, i.link]),
+    ...sorted.map((i) => [i.date, i.time, i.title, i.location, i.category, i.estimatedCost, i.actualCost ?? "", i.currency || currency, i.notes, i.link]),
   ]);
 }
 
@@ -58,6 +59,7 @@ const HEADER_ALIASES = {
   category: ["category", "type", "kind"],
   estimatedCost: ["estimatedcost", "estimate", "estimated", "cost", "price", "plannedcost", "planned", "budget", "amount"],
   actualCost: ["actualcost", "actual", "spent", "paid", "paidamount"],
+  currency: ["currency", "cur", "ccy"],
   notes: ["notes", "note", "comments", "comment", "details"],
   link: ["link", "url", "website", "booking", "bookinglink"],
 };
@@ -103,6 +105,7 @@ export function csvToItems(text) {
     const title = get(row, "title") || get(row, "location");
     if (!title) { skipped++; continue; }
     const rawCategory = get(row, "category");
+    const currency = get(row, "currency").toUpperCase();
     items.push({
       id: newId(),
       date: parseLooseDate(get(row, "date")),
@@ -114,6 +117,7 @@ export function csvToItems(text) {
       actualCost: parseMoney(get(row, "actualCost")),
       notes: get(row, "notes"),
       link: get(row, "link"),
+      ...(/^[A-Z]{3}$/.test(currency) ? { currency } : {}),
     });
   }
   return { items, skipped, matchedColumns: Object.keys(map) };

@@ -105,7 +105,7 @@ export function destinationText(cities) {
   return `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
 }
 
-/** The trip's cities as [{ name, lat?, lon? }]. Older trips only have the destination text. */
+/** The trip's cities as [{ name, country?, lat?, lon? }]. Older trips only have the destination text. */
 export function tripCities(trip) {
   if (Array.isArray(trip?.cities)) return trip.cities.filter((c) => c?.name);
   return parseDestination(trip?.destination).map((name) => ({ name }));
@@ -146,3 +146,30 @@ export function basePoint(trip, base) {
 }
 
 export const sameName = (a, b) => norm(a) === norm(b);
+
+/**
+ * The trip's countries, in the order you'll visit them: ["ES", "FR"].
+ * Trips made before multi-country trips have a single `country`.
+ */
+export function tripCountries(trip) {
+  if (Array.isArray(trip?.countries) && trip.countries.some(Boolean)) return [...new Set(trip.countries.filter(Boolean))];
+  return trip?.country ? [trip.country] : [];
+}
+
+/** The country a trip city is in. Cities saved before multi-country trips are in the trip's (first) country. */
+export function cityCountry(trip, cityName) {
+  const city = tripCities(trip).find((c) => norm(c.name) === norm(cityName));
+  return city?.country || tripCountries(trip)[0] || "";
+}
+
+/**
+ * The country you're in on a day: the country of that day's city (set, or carried over
+ * from an earlier day). One-country trips are in that country every day; a day of a
+ * multi-country trip with no city yet counts as the first country.
+ */
+export function dayCountry(trip, date, days) {
+  const countries = tripCountries(trip);
+  if (countries.length <= 1) return countries[0] ?? "";
+  const b = date && days.includes(date) ? dayBase(trip, date, days) : null;
+  return (b?.city && cityCountry(trip, b.city)) || countries[0];
+}

@@ -87,7 +87,7 @@ export function rankPlaces(features, query, limit = 8, opts = {}) {
       name: p.name,
       area,
       country: p.country ?? "",
-      countryCode: p.countrycode ?? "",
+      countryCode: String(p.countrycode ?? "").toUpperCase(),
       kind: String(p.osm_value ?? "").replace(/_/g, " "),
       category: categoryForPlace(p),
       lat, lon,
@@ -110,8 +110,22 @@ const cache = new Map();
 /**
  * Search places in a country. Pass an AbortSignal so a newer keystroke cancels the old request.
  * opts.near ({ lat, lon }) prefers places around that day's area; opts.only "settlement" for cities and districts.
+ * `countryCode` can be a list (a multi-country trip): each country is asked once and the results merged.
  */
 export async function searchPlaces(query, countryCode, signal, opts = {}) {
+  if (Array.isArray(countryCode)) {
+    const codes = [...new Set(countryCode.filter(Boolean))];
+    if (codes.length <= 1) return searchOne(query, codes[0] ?? "", signal, opts);
+    const lists = await Promise.all(codes.map((c) => searchOne(query, c, signal, opts).catch((e) => {
+      if (signal?.aborted) throw e;
+      return [];
+    })));
+    return lists.flat().sort((a, b) => b.score - a.score).slice(0, 8);
+  }
+  return searchOne(query, countryCode, signal, opts);
+}
+
+async function searchOne(query, countryCode, signal, opts = {}) {
   const q = String(query ?? "").trim();
   if (q.length < (opts.minChars ?? MIN_CHARS)) return [];
   const near = opts.near && Number.isFinite(opts.near.lat) ? opts.near : null;

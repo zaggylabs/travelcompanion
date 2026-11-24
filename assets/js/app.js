@@ -1,8 +1,8 @@
 import { CATEGORIES, newId } from "./lib/constants.js";
 import { prettyHours } from "./lib/placeinfo.js";
-import { ALL_CURRENCIES, findCountry, flag, getCountry, searchCountries } from "./lib/countries.js";
+import { ALL_CURRENCIES, currencyForCountry, findCountry, flag, getCountry, searchCountries } from "./lib/countries.js";
 import { locatePlace, mapsLink, searchPlaces } from "./lib/places.js";
-import { baseLabel, basePoint, dayBase, destinationText, popularAreas, popularCities, sameName, tripCities } from "./lib/regions.js";
+import { baseLabel, basePoint, cityCountry, dayBase, dayCountry, destinationText, popularAreas, popularCities, sameName, tripCities, tripCountries } from "./lib/regions.js";
 import { crowdTip, dayNote, getHolidays, getPlaceInfo } from "./lib/placeinfo.js";
 import { GUIDES_CHECKED, SCHENGEN_NOTE, getGuide, homeAdviceLink, isSchengen, visaFor, visaOverviewLink, wikivoyageUrl } from "./lib/guides.js";
 import { getWikivoyage } from "./lib/wikivoyage.js";
@@ -12,7 +12,7 @@ import { autocomplete } from "./autocomplete.js";
 import { daysBetween, formatDay } from "./lib/dates.js";
 import { formatMoney } from "./lib/money.js";
 import { browserGuess, convert, getRates, savedHome, saveHome } from "./lib/rates.js";
-import { expectedCost, isPaid, setPaid, summarizeBudget } from "./lib/budget.js";
+import { expectedCost, isPaid, itemCurrency, setPaid, summarizeBudget } from "./lib/budget.js";
 import { csvToItems, itemsToCsv } from "./lib/csv.js";
 import { IDEA_GROUPS, emptyIdea, groupForPlace, groupIdeas, groupOf, ideaToItem } from "./lib/ideas.js";
 import { deleteTrip, loadTrips, saveTrip, STORAGE_KEY } from "./lib/store.js";
@@ -107,6 +107,28 @@ const alt = (amount, currency, cls = "") => {
   return t ? h("span", { class: `alt num ${cls}` }, t) : null;
 };
 
+/** Amount from one currency into another with today's rates (null when there's no rate). */
+const convertAmount = (amount, from, to) => (from === to ? amount : convert(amount, from, to, rates));
+/** Budget totals in the trip's currency, with plans in other currencies converted. */
+const summarize = (trip, dayCount) => summarizeBudget(trip, dayCount, convertAmount);
+
+const isMulti = (trip) => tripCountries(trip).length > 1;
+/**
+ * The currency a new plan starts in: on a multi-country trip, the currency of the
+ * country it's in (the day's, or the picked place's); otherwise the trip's currency.
+ */
+function planCurrency(trip, cc) {
+  if (!isMulti(trip) || !cc) return trip.currency;
+  return currencyForCountry(cc) ?? trip.currency;
+}
+/** Plans only store a currency when it differs from the trip's. */
+const withCurrency = (item, currency, trip) => {
+  const { currency: _old, ...rest } = item;
+  return currency && currency !== trip.currency ? { ...rest, currency } : rest;
+};
+/** The country a plan (or saved place, or Discover result) is in. */
+const itemCountry = (item, trip, days) => item?.place?.cc || item?.cc || dayCountry(trip, item?.date, days) || tripCountries(trip)[0] || "";
+
 function setHome(next) {
   const changed = next.currency !== home.currency;
   home = next;
@@ -134,7 +156,7 @@ function currentTripId() {
 }
 
 function openTrip(id) {
-  Object.assign(ui, { tab: "itinerary", editingBase: null, selectedItem: null, editingTrip: false, confirmDelete: false, editingItem: null, notice: null, attachOpen: null, attachError: null, confirmRemoveFile: null, selectedIdea: null, editingIdea: null, schedulingIdea: null, discover: null });
+  Object.assign(ui, { tab: "itinerary", editingBase: null, selectedItem: null, editingTrip: false, confirmDelete: false, editingItem: null, notice: null, attachOpen: null, attachError: null, confirmRemoveFile: null, selectedIdea: null, editingIdea: null, schedulingIdea: null, discover: null, guideCountry: null });
   location.hash = id ? `trip/${encodeURIComponent(id)}` : "";
   if (!id) history.replaceState(null, "", location.pathname + location.search);
   render();
@@ -248,7 +270,7 @@ function tripList(trips, homeShowing) {
     sorted.length
       ? h("ul", { class: "trip-grid" }, sorted.map((t) => {
           const days = daysBetween(t.startDate, t.endDate).length;
-          const s = summarizeBudget(t, days);
+          const s = summarize(t, days);
           return h("li", null, h("button", { class: "trip-card", type: "button", onclick: () => openTrip(t.id) },
             h("strong", null, t.name),
             h("span", { class: "muted" }, placeLine(t) || "No destination yet"),
@@ -278,10 +300,10 @@ const FLAGS_OK = (() => {
 })();
 const countryIcon = (code) => (FLAGS_OK && code ? flag(code) : "🌏");
 
-// "🇯🇵 Japan · Tokyo & Osaka"
+// "🇯🇵 Japan · Tokyo & Osaka", "🇪🇸 Spain & 🇫🇷 France · Barcelona, Madrid & Paris"
 function placeLine(trip) {
-  const c = getCountry(trip.country);
-  return [c && (FLAGS_OK ? `${flag(c.code)} ${c.name}` : c.name), trip.destination].filter(Boolean).join(" · ");
+  const names = tripCountries(trip).map(getCountry).filter(Boolean).map((c) => (FLAGS_OK ? `${flag(c.code)} ${c.name}` : c.name));
+  return [destinationText(names), trip.destination].filter(Boolean).join(" · ");
 }
 
 function field(label, control, cls) {
@@ -296,86 +318,168 @@ const settlementRow = (p) => [
 const osmFooter = () => h("span", { class: "small muted" }, "Places from © OpenStreetMap contributors");
 
 function tripForm(initial, submitLabel, onSubmit, onCancel) {
-  const currencies = ALL_CURRENCIES.includes(initial.currency) ? ALL_CURRENCIES : [initial.currency, ...ALL_CURRENCIES];
   const error = h("p", { class: "error", hidden: true }, "The end date is before the start date.");
 
-  // Country: pick one and the currency follows. Older trips without one get a guess from the destination.
-  let country = getCountry(initial.country) ?? (initial.country === undefined ? findCountry(initial.destination) : null);
-  const currencySelect = h("select", { name: "currency" }, currencies.map((c) => h("option", { selected: c === initial.currency }, c)));
+  // Countries: pick one (or several, in the order you'll visit) and the currency follows.
+  // Older trips without a country get a guess from the destination.
+  const guessed = initial.country === undefined ? findCountry(initial.destination) : null;
+  const countries = (tripCountries(initial).length ? tripCountries(initial) : guessed ? [guessed.code] : []).map(getCountry).filter(Boolean);
+  const startCurrency = initial.currency || home.currency;
+  const currencies = ALL_CURRENCIES.includes(startCurrency) ? ALL_CURRENCIES : [startCurrency, ...ALL_CURRENCIES];
+  const currencySelect = h("select", { name: "currency" }, currencies.map((c) => h("option", { selected: c === startCurrency }, c)));
+  const currencyLabel = h("span", null, "Currency");
   const currencyHint = h("span", { class: "hint-inline" });
-  const countryInput = h("input", {
-    name: "countryName", placeholder: "Start typing, e.g. Japan", value: country?.name ?? "", autofocus: true,
-  });
+  const totalsNote = h("p", { class: "small muted form-note span-all" });
+  let currencyTouched = false;
+  const countryInput = h("input", { name: "countryName", placeholder: "Start typing, e.g. Japan", autofocus: true });
+  const countryLabel = h("span", null, "Country");
+  const countryTags = h("div", { class: "city-tags country-tags" });
   const nameInput = h("input", { name: "name", value: initial.name });
-  const countryFlag = h("span", { class: "country-flag", "aria-hidden": "true" }, countryIcon(country?.code));
-  const setCountry = (c, picked) => {
-    const changed = c?.code !== country?.code;
-    country = c;
-    countryFlag.textContent = countryIcon(c?.code);
-    if (c) {
-      if (picked) countryInput.value = c.name;
-      if (![...currencySelect.options].some((o) => o.value === c.currency)) currencySelect.prepend(h("option", null, c.currency));
-      const changedCurrency = currencySelect.value !== c.currency;
-      currencySelect.value = c.currency;
-      currencyHint.textContent = changedCurrency ? `Set to ${c.currency} for ${c.name}` : "";
-    }
-    nameInput.placeholder = c ? `${c.name} trip` : "e.g. Japan with the family";
-    if (changed) drawCities();
-  };
-  const countryBox = autocomplete(countryInput, {
-    search: (q) => searchCountries(q),
-    renderItem: (c) => [FLAGS_OK && h("span", { class: "ac-icon", "aria-hidden": "true" }, flag(c.code)), h("span", { class: "ac-main" }, h("span", { class: "ac-title" }, c.name)), h("span", { class: "ac-tag num" }, c.currency)].filter(Boolean),
-    onPick: (c) => { setCountry(c, true); cityInput.focus(); },
-    emptyText: () => "No country matches that.",
-  });
-  countryInput.addEventListener("input", () => setCountry(findCountry(countryInput.value), false));
-  currencySelect.addEventListener("change", () => { currencyHint.textContent = ""; });
+  const countryFlag = h("span", { class: "country-flag", "aria-hidden": "true" }, countryIcon(null));
 
-  // Cities: tap a popular one, or search for any city or town in the country.
-  const cities = tripCities(initial).map((c) => ({ ...c }));
-  const cityBox = h("div", { class: "city-picker" });
-  const cityInput = h("input", { name: "cityQuery", placeholder: "Add a city or town" });
-  const addCity = (c) => {
-    if (!c.name || cities.some((x) => sameName(x.name, c.name))) return;
-    const city = { name: c.name, ...(Number.isFinite(c.lat) ? { lat: c.lat, lon: c.lon } : {}) };
-    cities.push(city);
-    if (!Number.isFinite(city.lat)) locatePlace(city.name, country?.code, { only: "settlement" }).then((pt) => { if (pt) Object.assign(city, pt); });
+  const setCurrency = (code, why) => {
+    if (!code) return;
+    if (![...currencySelect.options].some((o) => o.value === code)) currencySelect.prepend(h("option", null, code));
+    const changed = currencySelect.value !== code;
+    currencySelect.value = code;
+    currencyHint.textContent = changed ? why : "";
+  };
+  // The trip's currency is what totals and budget limits are in: the country's own for a
+  // one-country trip, your home currency when the trip crosses borders.
+  const pickCurrency = () => {
+    const multi = countries.length > 1;
+    if (!currencyTouched) {
+      if (multi) setCurrency(home.currency, `Totals set to ${home.currency}, your home currency, to add up costs from ${destinationText(countries.map((c) => c.name))}`);
+      else if (countries[0]) setCurrency(countries[0].currency, `Set to ${countries[0].currency} for ${countries[0].name}`);
+    }
+    currencyLabel.textContent = multi ? "Totals in" : "Currency";
+    const local = [...new Set(countries.map((c) => c.currency))];
+    totalsNote.textContent = multi
+      ? `Each plan's cost is entered in the money of the country it's in (${local.join(", ")}). Totals and budget limits add them up in ${currencySelect.value}.`
+      : "";
+    totalsNote.hidden = !multi;
+  };
+
+  const drawCountries = () => {
+    countryFlag.textContent = countryIcon(null);
+    countryLabel.textContent = countries.length ? "Add another country (optional)" : "Country";
+    countryInput.placeholder = countries.length ? "Going on somewhere else? e.g. France" : "Start typing, e.g. Japan";
+    countryTags.replaceChildren(...countries.map((c, i) =>
+      h("span", { class: "city-tag" }, countries.length > 1 && h("span", { class: "num muted" }, `${i + 1}`), FLAGS_OK ? `${flag(c.code)} ` : "", c.name,
+        h("button", { type: "button", "aria-label": `Remove ${c.name}`, onclick: () => removeCountry(c) }, "✕"))));
+    countryTags.hidden = countries.length === 0;
+    const first = countries[0];
+    nameInput.placeholder = countries.length > 1 ? `${destinationText(countries.map((c) => c.name))} trip` : first ? `${first.name} trip` : "e.g. Japan with the family";
+  };
+  const addCountry = (c) => {
+    if (!c || countries.some((x) => x.code === c.code)) return;
+    countries.push(c);
+    countryInput.value = "";
+    drawCountries();
+    pickCurrency();
     drawCities();
   };
-  const cityAc = autocomplete(cityInput, {
-    delay: 300,
-    search: (q, signal) => searchPlaces(q, country?.code, signal, { only: "settlement", minChars: 2 }),
-    renderItem: settlementRow,
-    footer: osmFooter,
-    onPick: (p) => { cityInput.value = ""; addCity(p); cityInput.focus(); },
+  const removeCountry = (c) => {
+    countries.splice(countries.indexOf(c), 1);
+    for (let i = cities.length - 1; i >= 0; i--) if (cities[i].country === c.code) cities.splice(i, 1);
+    drawCountries();
+    pickCurrency();
+    drawCities();
+  };
+  const countryBox = autocomplete(countryInput, {
+    search: (q) => searchCountries(q).filter((c) => !countries.some((x) => x.code === c.code)),
+    renderItem: (c) => [FLAGS_OK && h("span", { class: "ac-icon", "aria-hidden": "true" }, flag(c.code)), h("span", { class: "ac-main" }, h("span", { class: "ac-title" }, c.name)), h("span", { class: "ac-tag num" }, c.currency)].filter(Boolean),
+    onPick: (c) => { addCountry(c); cityInputs.get(c.code)?.input.focus(); },
+    emptyText: () => "No country matches that.",
   });
-  // Enter adds what's typed, even if it isn't in the suggestions.
-  cityInput.addEventListener("keydown", (e) => {
+  countryInput.addEventListener("input", () => { countryFlag.textContent = countryIcon(findCountry(countryInput.value)?.code); });
+  // Enter adds a country typed out in full.
+  countryInput.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || e.defaultPrevented) return;
     e.preventDefault();
-    const name = cityInput.value.trim();
-    if (name) { cityInput.value = ""; addCity({ name }); cityInput.focus(); }
+    const c = findCountry(countryInput.value);
+    if (c) addCountry(c);
   });
+  currencySelect.addEventListener("change", () => { currencyTouched = true; currencyHint.textContent = ""; pickCurrency(); });
+
+  // Cities: tap a popular one, or search for any city or town, in each country.
+  const cities = tripCities(initial).map((c) => ({ ...c, country: c.country || countries[0]?.code || "" }));
+  const cityBox = h("div", { class: "city-picker" });
+  const cityInputs = new Map(); // country code -> { input, el }, kept across redraws so typing isn't lost
+  const addCity = (c, code) => {
+    if (!c.name || cities.some((x) => sameName(x.name, c.name) && (x.country || "") === (code || ""))) return;
+    const city = { name: c.name, ...(code ? { country: code } : {}), ...(Number.isFinite(c.lat) ? { lat: c.lat, lon: c.lon } : {}) };
+    cities.push(city);
+    if (!Number.isFinite(city.lat)) locatePlace(city.name, code, { only: "settlement" }).then((pt) => { if (pt) Object.assign(city, pt); });
+    drawCities();
+  };
+  const cityInputFor = (c) => {
+    const code = c?.code ?? "";
+    if (cityInputs.has(code)) return cityInputs.get(code);
+    const input = h("input", { name: "cityQuery", "data-country": code, placeholder: countries.length > 1 && c ? `Add a city or town in ${c.name}` : "Add a city or town" });
+    const ac = autocomplete(input, {
+      delay: 300,
+      search: (q, signal) => searchPlaces(q, code, signal, { only: "settlement", minChars: 2 }),
+      renderItem: settlementRow,
+      footer: osmFooter,
+      onPick: (p) => { input.value = ""; addCity(p, code); cityInputs.get(code)?.input.focus(); },
+    });
+    // Enter adds what's typed, even if it isn't in the suggestions.
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || e.defaultPrevented) return;
+      e.preventDefault();
+      const name = input.value.trim();
+      if (name) { input.value = ""; addCity({ name }, code); cityInputs.get(code)?.input.focus(); }
+    });
+    const entry = { input, el: ac.el };
+    cityInputs.set(code, entry);
+    return entry;
+  };
+  const cityTag = (c) => {
+    const i = cities.indexOf(c);
+    return h("span", { class: "city-tag" }, h("span", { class: "num muted" }, `${i + 1}`), c.name,
+      h("button", { type: "button", "aria-label": `Remove ${c.name}`, onclick: () => { cities.splice(cities.indexOf(c), 1); drawCities(); } }, "✕"));
+  };
   function drawCities() {
-    const popular = popularCities(country?.code).filter((n) => !cities.some((c) => sameName(c.name, n)));
-    cityBox.replaceChildren(...[
-      cities.length > 0 && h("div", { class: "city-tags" }, cities.map((c, i) =>
-        h("span", { class: "city-tag" }, h("span", { class: "num muted" }, `${i + 1}`), c.name,
-          h("button", { type: "button", "aria-label": `Remove ${c.name}`, onclick: () => { cities.splice(i, 1); drawCities(); } }, "✕")))),
-      cityAc.el,
-      popular.length > 0 && h("div", { class: "city-suggest" },
-        h("span", { class: "small muted" }, `Popular in ${country.name}:`),
-        popular.map((n) => h("button", { class: "chip small", type: "button", onclick: () => addCity({ name: n }) }, "+ ", n))),
-      !country && h("p", { class: "small muted" }, "Pick the country first and we'll suggest its cities."),
-      cities.length > 1 && h("p", { class: "small muted" }, "In the order you'll visit them. You'll pick which city (and area) each day is in on the itinerary."),
+    const multi = countries.length > 1;
+    const groups = countries.length ? countries : [null];
+    for (const c of cities) if (!countries.some((x) => x.code === c.country) && countries[0]) c.country = countries[0].code;
+    for (const code of [...cityInputs.keys()]) if (!groups.some((g) => (g?.code ?? "") === code)) cityInputs.delete(code);
+    cityBox.replaceChildren(...groups.map((country) => {
+      const own = cities.filter((c) => !country || c.country === country.code);
+      const popular = popularCities(country?.code).filter((n) => !own.some((c) => sameName(c.name, n)));
+      return h("div", { class: `city-group${multi ? " multi" : ""}` },
+        multi && h("p", { class: "city-group-head" }, FLAGS_OK ? `${flag(country.code)} ` : "", h("strong", null, country.name)),
+        own.length > 0 && h("div", { class: "city-tags" }, own.map(cityTag)),
+        (() => {
+          const entry = cityInputFor(country);
+          entry.input.placeholder = multi ? `Add a city or town in ${country.name}` : "Add a city or town";
+          return entry.el;
+        })(),
+        popular.length > 0 && h("div", { class: "city-suggest" },
+          h("span", { class: "small muted" }, `Popular in ${country.name}:`),
+          popular.slice(0, multi ? 8 : 12).map((n) => h("button", { class: "chip small", type: "button", onclick: () => addCity({ name: n }, country.code) }, "+ ", n))));
+    }),
+    ...[
+      !countries.length && h("p", { class: "small muted" }, "Pick the country first and we'll suggest its cities."),
+      cities.length > 1 && h("p", { class: "small muted" }, multi
+        ? "The numbers are the order you'll visit them. On the itinerary you pick which city each day is in, and that sets the day's country."
+        : "In the order you'll visit them. You'll pick which city (and area) each day is in on the itinerary."),
     ].filter(Boolean));
   }
+  drawCountries();
   drawCities();
-  setCountry(country, false);
+  // A currency chosen on purpose (not the one we'd pick) is left alone when countries change.
+  const autoCurrency = countries.length > 1 ? home.currency : countries[0]?.currency;
+  currencyTouched = Boolean(autoCurrency) && startCurrency !== autoCurrency;
+  pickCurrency();
+  currencyHint.textContent = "";
 
   const step = (n, title, ...body) => h("fieldset", { class: "step span-all" }, h("legend", null, h("span", { class: "step-n" }, n), title), ...body);
   const form = h("form", { class: "form-grid two trip-form" },
-    step(1, "Where are you going?", field("Country", h("div", { class: "with-flag" }, countryFlag, countryBox.el)),
+    step(1, "Where are you going?",
+      countryTags,
+      h("label", { class: "field" }, countryLabel, h("div", { class: "with-flag" }, countryFlag, countryBox.el)),
       h("p", { class: "small muted form-note" }, currencyHint)),
     step(2, "Which cities?", cityBox),
     step(3, "When?", h("div", { class: "form-grid two" },
@@ -384,8 +488,9 @@ function tripForm(initial, submitLabel, onSubmit, onCancel) {
     step(4, "The details", h("div", { class: "form-grid two" },
       field("Trip name", nameInput),
       h("div", { class: "form-grid two tight" },
-        field("Currency", currencySelect),
-        field("Travelers", h("input", { name: "travelers", type: "number", min: 1, value: initial.travelers }))))),
+        h("label", { class: "field" }, currencyLabel, currencySelect),
+        field("Travelers", h("input", { name: "travelers", type: "number", min: 1, value: initial.travelers }))),
+      totalsNote)),
     error,
     h("div", { class: "actions span-all" },
       h("button", { class: "btn primary", type: "submit" }, submitLabel),
@@ -396,14 +501,19 @@ function tripForm(initial, submitLabel, onSubmit, onCancel) {
     const startDate = String(f.get("startDate"));
     const endDate = String(f.get("endDate"));
     if (startDate && endDate && endDate < startDate) { error.hidden = false; return; }
-    const c = country ?? findCountry(countryInput.value);
-    const typed = cityInput.value.trim();
-    if (typed && !cities.some((x) => sameName(x.name, typed))) cities.push({ name: typed });
-    const name = String(f.get("name")).trim() || (c ? `${c.name} trip` : cities[0] ? `${cities[0].name} trip` : "My trip");
+    const typedCountry = findCountry(countryInput.value);
+    if (typedCountry) addCountry(typedCountry);
+    for (const [code, { input }] of cityInputs) {
+      const typed = input.value.trim();
+      if (typed && !cities.some((x) => sameName(x.name, typed))) cities.push({ name: typed, ...(code ? { country: code } : {}) });
+    }
+    const codes = countries.map((c) => c.code);
+    const fallbackName = countries.length > 1 ? `${destinationText(countries.map((c) => c.name))} trip` : countries[0] ? `${countries[0].name} trip` : cities[0] ? `${cities[0].name} trip` : "My trip";
     onSubmit({
       ...initial,
-      name,
-      country: c?.code ?? "",
+      name: String(f.get("name")).trim() || fallbackName,
+      country: codes[0] ?? "",
+      countries: codes,
       cities,
       destination: destinationText(cities),
       currency: String(f.get("currency")),
@@ -415,6 +525,21 @@ function tripForm(initial, submitLabel, onSubmit, onCancel) {
   return form;
 }
 
+/**
+ * Saving an edited trip whose currency changed: plans priced before keep the currency
+ * they were entered in, and budget limits are converted so they mean the same amount.
+ */
+function keepCurrencies(before, after) {
+  if (!before.currency || before.currency === after.currency) return after;
+  const items = after.items.map((i) => (i.currency ? withCurrency(i, i.currency, after) : withCurrency(i, before.currency, after)));
+  const budget = {};
+  for (const [cat, v] of Object.entries(after.budget ?? {})) {
+    const n = convertAmount(v, before.currency, after.currency);
+    budget[cat] = n === null ? v : Math.round(n);
+  }
+  return { ...after, items, budget };
+}
+
 /* ----- trip view ----- */
 
 // Look up where the trip's cities and day areas are (once), so searches can favour places nearby.
@@ -424,8 +549,8 @@ function updateTrip(tripId, fn) {
   if (current) saveTrip(fn(current));
 }
 function fillCoords(trip) {
-  const cc = trip.country;
   for (const city of tripCities(trip)) {
+    const cc = city.country || tripCountries(trip)[0];
     const key = `${trip.id}|city|${city.name}`;
     if (Number.isFinite(city.lat) || locating.has(key)) continue;
     locating.add(key);
@@ -442,7 +567,7 @@ function fillCoords(trip) {
     const near = basePoint(trip, { city: b.city });
     if (locating.has(key) || !near) continue; // wait for the city first
     locating.add(key);
-    locateArea(b.area, cc, near).then((pt) => {
+    locateArea(b.area, cityCountry(trip, b.city), near).then((pt) => {
       if (pt) updateTrip(trip.id, (t) => {
         const cur = t.dayBases?.[date];
         return cur && cur.area === b.area ? { ...t, dayBases: { ...t.dayBases, [date]: { ...cur, ...pt } } } : t;
@@ -467,7 +592,7 @@ function tripView(trip) {
   const header = ui.editingTrip
     ? h("section", { class: "card pad" },
         h("h2", null, "Edit trip"),
-        tripForm(trip, "Save", (t) => { saveTrip(t); ui.editingTrip = false; render(); },
+        tripForm(trip, "Save", (t) => { saveTrip(keepCurrencies(trip, t)); ui.editingTrip = false; render(); },
           () => { ui.editingTrip = false; ui.confirmDelete = false; render(); }),
         h("div", { class: "danger-zone" }, ui.confirmDelete
           ? [h("span", null, "Delete this trip and all its plans? This can't be undone."),
@@ -518,7 +643,14 @@ const guideSec = (title, ...body) => h("section", { class: "card guide-sec" }, h
 const bullets = (items, cls) => h("ul", { class: `guide-list ${cls || ""}` }, items.map((t) => h("li", null, t)));
 
 function guideView(trip) {
-  const dest = getCountry(trip.country);
+  const all = tripCountries(trip).map(getCountry).filter(Boolean);
+  // A multi-country trip gets a tab per country, starting with where you are today (or the first).
+  if (!all.some((c) => c.code === ui.guideCountry)) {
+    const days = daysBetween(trip.startDate, trip.endDate);
+    const today = new Date().toISOString().slice(0, 10);
+    ui.guideCountry = days.includes(today) ? dayCountry(trip, today, days) : all[0]?.code ?? null;
+  }
+  const dest = all.find((c) => c.code === ui.guideCountry) ?? all[0];
   if (!dest) {
     return h("div", { class: "card pad guide-empty" },
       h("h2", null, "Good to know"),
@@ -537,7 +669,11 @@ function guideView(trip) {
       h("button", { class: "linkish", type: "button", onclick: () => { ui.homeOpen = true; render(); window.scrollTo({ top: 0 }); } }, homeC ? "Not your passport?" : "Set where you're from"),
       " Entry rules change, so always confirm on the official sites before you book or fly."));
 
-  return h("div", { class: "guide stack" }, intro,
+  const picker = all.length > 1 && h("div", { class: "guide-countries", role: "tablist", "aria-label": "Country" }, all.map((c) =>
+    h("button", { type: "button", role: "tab", class: `chip${c.code === dest.code ? " active" : ""}`, "aria-selected": String(c.code === dest.code),
+      onclick: () => { ui.guideCountry = c.code; render(); } }, FLAGS_OK ? `${flag(c.code)} ` : "", c.name)));
+
+  return h("div", { class: "guide stack" }, picker, intro,
     going
       ? guideSec("Entry", h("p", null, `This is your home country, so you won't need a visa. Make sure your passport is valid.`))
       : visaSection(guide, dest, homeC, entrySlot),
@@ -676,9 +812,23 @@ function budgetSummary(trip, days) {
   return box;
 }
 
+/** "Made up of €1,200.00 + CHF 340.00": what a multi-currency total is in each currency. */
+function madeUpOf(s, trip) {
+  const parts = Object.entries(s.byCurrency).filter(([, v]) => v > 0);
+  if (!parts.length || (parts.length === 1 && parts[0][0] === trip.currency)) return null;
+  return h("p", { class: "small muted made-of" }, "Made up of ", parts.sort((a, b) => (a[0] === trip.currency) - (b[0] === trip.currency))
+    .map(([c, v], i) => [i ? " + " : "", h("span", { class: "num" }, formatMoney(v, c))]));
+}
+
+/** Plans whose currency we have no rate for are left out of totals, so say so. */
+function unconvertedNote(s, trip) {
+  if (!s.unconverted.length || ratesStatus === "loading") return null;
+  return h("p", { class: "small bad" }, `Plans in ${s.unconverted.join(", ")} aren't in these totals: there's no exchange rate to ${trip.currency} right now.`);
+}
+
 function summaryContent(trip, days, draft) {
   const money = (n) => formatMoney(n, trip.currency);
-  const s = summarizeBudget(trip, days.length);
+  const s = summarize(trip, days.length);
   const toPay = Math.max(0, s.totalProjected - s.totalSpent);
   const cats = s.categories.filter((c) => c.projected > 0 || c.spent > 0).sort((a, b) => b.projected - a.projected);
   const hasBudget = s.totalBudget > 0;
@@ -694,7 +844,7 @@ function summaryContent(trip, days, draft) {
 
   const goBudget = () => { ui.tab = "budget"; ui.editingItem = null; ui.attachOpen = null; render(); };
 
-  if (s.totalProjected === 0 && s.totalSpent === 0) {
+  if (s.totalProjected === 0 && s.totalSpent === 0 && !s.unconverted.length) {
     return [h("div", { class: "summary-body" },
       h("h2", null, "Budget"),
       h("p", { class: "small muted" }, "Add a cost to any plan and it shows up here as a to-pay checklist. Tick things off as you pay for them."))];
@@ -706,6 +856,8 @@ function summaryContent(trip, days, draft) {
       h("p", { class: "small muted" }, "Expected total"),
       h("p", { class: "summary-total num" }, money(s.totalProjected)),
       alt(s.totalProjected, trip.currency, "summary-alt"),
+      madeUpOf(s, trip),
+      unconvertedNote(s, trip),
       h("p", { class: "small muted" }, `${money(s.projectedPerPerson)} per person`, s.projectedPerDay !== null ? ` · ${money(s.projectedPerDay)} per day` : "")),
     h("div", { class: "summary-split" },
       h("div", null, h("span", { class: "small muted" }, "Paid so far"), h("strong", { class: "num good" }, money(s.totalSpent)), alt(s.totalSpent, trip.currency)),
@@ -764,6 +916,7 @@ function toPayList(trip, days) {
     h("ul", { class: "pay-list" }, rows.map((item) => {
       const paid = isPaid(item);
       const amount = expectedCost(item);
+      const cur = itemCurrency(item, trip);
       const box = h("input", { type: "checkbox", checked: paid, "aria-label": `${item.title}: paid` });
       box.addEventListener("change", () => toggle(item, box.checked));
       return h("li", { class: paid ? "paid-row" : "" },
@@ -773,28 +926,36 @@ function toPayList(trip, days) {
             h("span", { class: "pay-title" }, item.title),
             h("span", { class: "small muted" }, h("i", { class: `dot cat-${item.category}` }), dayLabel(item.date))),
           h("span", { class: "pay-amt" },
-            h("span", { class: "num" }, formatMoney(amount, trip.currency)),
-            alt(amount, trip.currency))));
+            h("span", { class: "num" }, formatMoney(amount, cur)),
+            alt(amount, cur))));
     })));
 }
 
 const shortDate = (ms) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
-/** "¥1,000 = S$8.70 · rates from 23 Nov 2026", plus what to do when rates can't load. */
+/** Every currency the trip's costs are in, the trip's own first. */
+function tripCurrencyList(trip) {
+  return [...new Set([trip.currency, ...trip.items.filter((i) => i.estimatedCost > 0 || i.actualCost > 0).map((i) => itemCurrency(i, trip))].filter(Boolean))];
+}
+
+/** "¥1,000 = S$8.70 · €1.00 = S$1.45 · rates from 23 Nov 2026", plus what to do when rates can't load. */
 function rateNote(trip) {
-  if (!trip.currency || trip.currency === home.currency) return null;
+  const foreign = tripCurrencyList(trip).filter((c) => c !== home.currency);
+  if (!foreign.length) return null;
   const link = (href, text) => h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text);
   if (ratesStatus === "loading" && !rates) return h("p", { class: "small muted rate-note" }, `Loading ${home.currency} exchange rate…`);
   if (!rates) {
     return h("p", { class: "small muted rate-note" }, `Couldn't load exchange rates, so ${home.currency} amounts are hidden. `,
       h("button", { class: "linkish", type: "button", onclick: () => { loadRates(); render(); } }, "Try again"));
   }
-  let unit = 1;
-  while (unit < 1e6 && (toHome(unit, trip.currency) ?? 1) < 1) unit *= 10;
-  const v = toHome(unit, trip.currency);
-  if (v === null) return h("p", { class: "small muted rate-note" }, `No exchange rate available for ${trip.currency} to ${home.currency}.`);
+  const pairs = foreign.slice(0, 4).map((cur) => {
+    let unit = 1;
+    while (unit < 1e6 && (toHome(unit, cur) ?? 1) < 1) unit *= 10;
+    const v = toHome(unit, cur);
+    return v === null ? `no rate for ${cur}` : `${formatMoney(unit, cur)} = ${formatMoney(v, home.currency)}`;
+  });
   return h("p", { class: "small muted rate-note" },
-    `${formatMoney(unit, trip.currency)} = ${formatMoney(v, home.currency)} · `,
+    `${pairs.join(" · ")} · `,
     rates.stale ? `offline, using rates from ${shortDate(rates.updated)}` : `rates from ${shortDate(rates.updated)}`, " · ",
     rates.source === "er-api" ? link("https://www.exchangerate-api.com", "Rates by Exchange Rate API") : link("https://frankfurter.dev", "Frankfurter (ECB)"));
 }
@@ -814,7 +975,7 @@ function selectedItem(trip, days) {
 }
 
 function exportCsv(trip) {
-  const blob = new Blob([itemsToCsv(trip.items)], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob([itemsToCsv(trip.items, trip.currency)], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = h("a", { href: url, download: `${trip.name.replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "") || "trip"}.csv` });
   document.body.append(a);
@@ -834,8 +995,12 @@ function importCsv(trip, text) {
   }
   const dated = items.map((i) => i.date).filter(Boolean).sort();
   const patch = !trip.startDate && !trip.endDate && dated.length ? { startDate: dated[0], endDate: dated[dated.length - 1] } : {};
-  saveTrip({ ...trip, ...patch, items: [...trip.items, ...items] });
-  ui.notice = `Imported ${plural(items.length, "plan")}${skipped ? `, skipped ${plural(skipped, "empty row")}` : ""}.`;
+  // A Currency column is kept per row; rows without one are in the trip's currency.
+  const imported = items.map((i) => withCurrency(i, i.currency, trip));
+  const noCurrency = !matchedColumns.includes("currency") && isMulti(trip) && items.some((i) => i.estimatedCost || i.actualCost);
+  saveTrip({ ...trip, ...patch, items: [...trip.items, ...imported] });
+  ui.notice = `Imported ${plural(items.length, "plan")}${skipped ? `, skipped ${plural(skipped, "empty row")}` : ""}.` +
+    (noCurrency ? ` The file has no Currency column, so its costs were read as ${trip.currency}. Edit a plan to change its currency.` : "");
   render();
 }
 
@@ -862,7 +1027,8 @@ function itineraryView(trip, days) {
   return h("div", { class: "stack" },
     days.length === 0 && h("p", { class: "hint" }, "Set start and end dates in Edit trip to get a day-by-day plan."),
     groups.map((g) => {
-      const total = g.items.reduce((a, i) => a + expectedCost(i), 0);
+      // In the trip's currency; plans in other currencies are converted (and skipped if there's no rate).
+      const total = g.items.reduce((a, i) => a + (convertAmount(expectedCost(i), itemCurrency(i, trip), trip.currency) ?? 0), 0);
       const e = ui.editingItem;
       return h("section", { class: "day", "aria-label": g.label },
         h("div", { class: "day-head" },
@@ -897,6 +1063,7 @@ function baseButton(trip, days, date) {
   return h("button", { class: `day-base${b?.set ? " set" : ""}${open ? " open" : ""}`, type: "button", title, "aria-expanded": String(open),
     onclick: () => { ui.editingBase = open ? null : date; render(); } },
     h("span", { "aria-hidden": "true" }, "📍"), " ",
+    b && isMulti(trip) && FLAGS_OK ? `${flag(cityCountry(trip, b.city))} ` : "",
     b ? baseLabel(b) : "Where are you this day?",
     b && !b.area && h("span", { class: "day-base-add" }, " · pick an area"));
 }
@@ -906,8 +1073,12 @@ function setDayBase(trip, date, base) {
     const dayBases = { ...(t.dayBases ?? {}) };
     if (base) dayBases[date] = base; else delete dayBases[date];
     let cities = tripCities(t);
-    if (base?.city && !cities.some((c) => sameName(c.name, base.city))) cities = [...cities, { name: base.city, ...(base.cityPoint ?? {}) }];
+    if (base?.city && !cities.some((c) => sameName(c.name, base.city))) {
+      const country = base.cityCountry && tripCountries(t).includes(base.cityCountry) ? base.cityCountry : tripCountries(t)[0];
+      cities = [...cities, { name: base.city, ...(country ? { country } : {}), ...(base.cityPoint ?? {}) }];
+    }
     delete base?.cityPoint;
+    delete base?.cityCountry;
     return { ...t, dayBases, cities, destination: destinationText(cities) };
   });
 }
@@ -917,12 +1088,14 @@ function basePicker(trip, days, date) {
   const cities = tripCities(trip);
   const b = dayBase(trip, date, days);
   const city = b?.city ?? "";
-  const cc = trip.country;
-  const country = getCountry(cc);
+  const ccs = tripCountries(trip);
+  const multi = ccs.length > 1;
+  const cc = city ? cityCountry(trip, city) : ccs[0];
+  const country = getCountry(ccs[0]);
   const close = () => { ui.editingBase = null; render(); };
-  const pickCity = (name, point) => {
+  const pickCity = (name, point, cityCc) => {
     if (sameName(name, b?.city) && b?.set) { render(); return; }
-    setDayBase(trip, date, { city: name, cityPoint: point });
+    setDayBase(trip, date, { city: name, cityPoint: point, cityCountry: cityCc });
     render();
   };
   const pickArea = (name, point) => {
@@ -932,17 +1105,19 @@ function basePicker(trip, days, date) {
   };
 
   // Another city, searched in the trip's country.
-  const otherCity = h("input", { name: "otherCity", placeholder: cities.length ? "Another city…" : `A city${country ? ` in ${country.name}` : ""}`, autofocus: !cities.length || null });
+  const otherCity = h("input", { name: "otherCity", placeholder: cities.length ? "Another city…" : `A city${country && !multi ? ` in ${country.name}` : ""}`, autofocus: !cities.length || null });
   const otherCityBox = autocomplete(otherCity, {
     delay: 300,
-    search: (q, signal) => searchPlaces(q, cc, signal, { only: "settlement", minChars: 2 }),
-    renderItem: settlementRow, footer: osmFooter,
-    onPick: (p) => pickCity(p.name, Number.isFinite(p.lat) ? { lat: p.lat, lon: p.lon } : null),
+    search: (q, signal) => searchPlaces(q, ccs, signal, { only: "settlement", minChars: 2 }),
+    renderItem: multi ? (p) => [...settlementRow(p), FLAGS_OK && p.countryCode && h("span", { class: "ac-tag" }, flag(p.countryCode))].filter(Boolean) : settlementRow,
+    footer: osmFooter,
+    onPick: (p) => pickCity(p.name, Number.isFinite(p.lat) ? { lat: p.lat, lon: p.lon } : null, p.countryCode),
   });
   otherCity.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.defaultPrevented && otherCity.value.trim()) { e.preventDefault(); pickCity(otherCity.value.trim()); }
   });
-  const cityChoices = [...cities.map((c) => c.name), ...popularCities(cc).filter((n) => !cities.some((c) => sameName(c.name, n))).slice(0, cities.length ? 0 : 6)];
+  const cityChoices = [...cities.map((c) => c.name), ...popularCities(ccs[0]).filter((n) => !cities.some((c) => sameName(c.name, n))).slice(0, cities.length ? 0 : 6)];
+  const cityChip = (n) => (multi && FLAGS_OK ? `${flag(cityCountry(trip, n))} ${n}` : n);
 
   // Areas in the chosen city: popular ones, or search for any neighbourhood, station or landmark near it.
   const near = basePoint(trip, { city });
@@ -964,7 +1139,7 @@ function basePicker(trip, days, date) {
     h("div", { class: "base-row" },
       h("span", { class: "base-label small muted" }, "City"),
       h("div", { class: "base-choices" },
-        cityChoices.map((n) => h("button", { type: "button", class: `chip small${sameName(n, city) ? " active" : ""}`, "aria-pressed": String(sameName(n, city)), onclick: () => pickCity(n) }, n)),
+        cityChoices.map((n) => h("button", { type: "button", class: `chip small${sameName(n, city) ? " active" : ""}`, "aria-pressed": String(sameName(n, city)), onclick: () => pickCity(n) }, cityChip(n))),
         h("div", { class: "base-other" }, otherCityBox.el))),
     city && h("div", { class: "base-row" },
       h("span", { class: "base-label small muted" }, "Area"),
@@ -1035,7 +1210,7 @@ function itemButton(item, trip, selected) {
         item.link && h("span", null, "🔗"))),
     h("span", { class: "item-cost num" },
       expectedCost(item) > 0 || isPaid(item)
-        ? [formatMoney(expectedCost(item), trip.currency), alt(expectedCost(item), trip.currency),
+        ? [formatMoney(expectedCost(item), itemCurrency(item, trip)), alt(expectedCost(item), itemCurrency(item, trip)),
            isPaid(item) ? h("small", { class: "paid" }, "✓ Paid")
              : h("small", { class: "muted" }, item.actualCost !== null && item.actualCost !== undefined ? "To pay" : "Estimate")]
         : ""));
@@ -1119,7 +1294,7 @@ function ideasView(trip, days) {
               : [ideaRow(idea, trip, days, selected?.id === idea.id),
                  ui.schedulingIdea === idea.id && schedulePanel(idea.title, days, (date, time) => {
                    const current = loadTrips().find((t) => t.id === trip.id);
-                   if (current) saveTrip({ ...current, items: [...current.items, ideaToItem(idea, date, time)] });
+                   if (current) saveTrip({ ...current, items: [...current.items, withCurrency(ideaToItem(idea, date, time), planCurrency(current, idea.place?.cc || dayCountry(current, date, days)), current)] });
                    ui.schedulingIdea = null;
                  }, () => { ui.schedulingIdea = null; }),
                  !WIDE.matches && selected?.id === idea.id && ui.selectedIdea === idea.id && h("div", { class: "info-inline" }, infoPanel(ideaAsItem(idea), trip, days))]))))),
@@ -1186,10 +1361,11 @@ function schedulePanel(title, days, onAdd, onCancel) {
 
 function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
   const isNew = !onCancel;
-  const country = getCountry(trip.country);
+  const ccs = tripCountries(trip);
+  const country = ccs.length === 1 ? getCountry(ccs[0]) : null;
   const titleInput = h("input", {
     name: "title", required: true, autofocus: focus || null, value: idea.title,
-    placeholder: country ? `A place in ${country.name}, e.g. a restaurant or sight` : "A restaurant, sight or activity",
+    placeholder: ccs.length ? `A place in ${destinationText(ccs.map((c) => getCountry(c)?.name).filter(Boolean))}, e.g. a restaurant or sight` : "A restaurant, sight or activity",
   });
   const groupSelect = h("select", { name: "group" }, IDEA_GROUPS.map((g) => h("option", { value: g.key, selected: g.key === idea.group }, g.label)));
   const locationInput = h("input", { name: "location", placeholder: "Filled in when you pick a suggestion", value: idea.location });
@@ -1200,7 +1376,7 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
 
   const placeBox = autocomplete(titleInput, {
     delay: 350,
-    search: (q, signal) => searchPlaces(q, country?.code, signal),
+    search: (q, signal) => searchPlaces(q, ccs, signal),
     renderItem: (p) => [
       h("span", { class: "ac-icon", "aria-hidden": "true" }, "📍"),
       h("span", { class: "ac-main" },
@@ -1216,7 +1392,7 @@ function ideaForm(idea, trip, days, onSave, onCancel, onDelete, focus) {
       }
       const g = groupForPlace(p);
       if (g && !groupTouched) groupSelect.value = g;
-      picked = { link: mapsLink(p), place: p.osm ? { osm: p.osm, lat: p.lat, lon: p.lon, kind: p.kind, area: p.area } : undefined };
+      picked = { link: mapsLink(p), place: p.osm ? { osm: p.osm, lat: p.lat, lon: p.lon, kind: p.kind, area: p.area, ...(p.countryCode ? { cc: p.countryCode } : {}) } : undefined };
       if (activeInfo?.isConnected) fillInfo(activeInfo, { ...ideaAsItem(idea), title: p.name, group: groupSelect.value, place: picked.place }, trip, days);
     },
   });
@@ -1261,6 +1437,7 @@ function discoverState(trip, days = daysBetween(trip.startDate, trip.endDate)) {
     ui.discover = {
       tripId: trip.id, type: "food", radius: 1000, sort: "near", keyword: "", areaText: "", area: null, near: null,
       status: "idle", results: null, resultType: null, error: null, cached: false, shown: PAGE, selected: null, scheduling: null,
+      country: tripCountries(trip)[0] ?? "", // the country being searched: the day's, or the picked area's
     };
     // Start from where you are today (during the trip), or the first day that has a place.
     const today = new Date().toISOString().slice(0, 10);
@@ -1283,12 +1460,12 @@ function dayStops(trip, days) {
     const full = baseLabel(b);
     const last = stops[stops.length - 1];
     if (last && last.full === full && last.end === i - 1) { last.end = i; last.dates.push(date); return; }
-    stops.push({ full, text: b.area || b.city, city: b.city, point: basePoint(trip, b), exact: !b.area || Number.isFinite(b.lat), start: i, end: i, dates: [date] });
+    stops.push({ full, text: b.area || b.city, city: b.city, country: cityCountry(trip, b.city), point: basePoint(trip, b), exact: !b.area || Number.isFinite(b.lat), start: i, end: i, dates: [date] });
   });
   for (const s of stops) s.label = s.start === s.end ? `Day ${s.start + 1}` : `Day ${s.start + 1}–${s.end + 1}`;
   for (const c of tripCities(trip)) {
     if (!stops.some((s) => sameName(s.city, c.name) && sameName(s.text, c.name))) {
-      stops.push({ label: "", full: c.name, text: c.name, city: c.name, point: basePoint(trip, { city: c.name }), exact: true, dates: [] });
+      stops.push({ label: "", full: c.name, text: c.name, city: c.name, country: cityCountry(trip, c.name), point: basePoint(trip, { city: c.name }), exact: true, dates: [] });
     }
   }
   return stops;
@@ -1299,18 +1476,19 @@ function useStop(d, stop) {
   d.near = stop.point; // if the area still needs looking up, look around its city
   d.area = stop.point && stop.exact ? { text: stop.text, name: stop.text, label: stop.text === stop.city ? stop.city : `${stop.text}, ${stop.city}`, lat: stop.point.lat, lon: stop.point.lon } : null;
   d.stop = stop.full;
+  if (stop.country) d.country = stop.country;
   if (stop.dates.length) ui.lastScheduleDate = stop.dates[0];
 }
 
-const areaFrom = (p, text) => ({ text, name: p.name, label: [p.name, p.area].filter(Boolean).join(", "), lat: p.lat, lon: p.lon });
+const areaFrom = (p, text) => ({ text, name: p.name, label: [p.name, p.area].filter(Boolean).join(", "), lat: p.lat, lon: p.lon, cc: p.countryCode });
 
 function selectedResult(trip) {
   const d = discoverState(trip);
   return d.results?.find((r) => r.osm === d.selected) ?? null;
 }
 
-const resultLink = (r, d, trip) => mapsLink({ name: r.name, area: d.area?.name, country: getCountry(trip.country)?.name });
-const resultPlace = (r, d) => ({ osm: r.osm, lat: r.lat, lon: r.lon, kind: r.kind.toLowerCase(), area: d.area?.label ?? "" });
+const resultLink = (r, d, trip) => mapsLink({ name: r.name, area: d.area?.name, country: getCountry(d.country || tripCountries(trip)[0])?.name });
+const resultPlace = (r, d) => ({ osm: r.osm, lat: r.lat, lon: r.lon, kind: r.kind.toLowerCase(), area: d.area?.label ?? "", ...(d.country ? { cc: d.country } : {}) });
 
 // The info panel works on plans, so give it a search result in that shape.
 function discoverAsItem(r, trip) {
@@ -1319,27 +1497,31 @@ function discoverAsItem(r, trip) {
   const t = discoverType(d.resultType);
   return {
     id: `disc:${r.osm}`, title: r.name, location: d.area?.label ?? "", link: resultLink(r, d, trip), place: resultPlace(r, d),
-    category: t.category, date: "", time: "",
+    category: t.category, date: "", time: "", cc: d.country,
     nearby: `${formatDistance(r.distance)} from ${d.area?.name ?? "the search spot"}`,
   };
 }
 
 async function runDiscover(trip) {
   const d = discoverState(trip);
-  const country = getCountry(trip.country);
   discoverController?.abort();
   const controller = (discoverController = new AbortController());
   Object.assign(d, { status: "loading", error: null, results: null, shown: PAGE, selected: null, scheduling: null });
   render();
   try {
     if (!d.area || d.area.text !== d.areaText) {
-      const found = (await searchPlaces(d.areaText, country?.code, controller.signal, { near: d.near }))[0];
+      // The day's country first; on a multi-country trip, then the others.
+      const ccs = tripCountries(trip);
+      let found = (await searchPlaces(d.areaText, d.country || ccs[0], controller.signal, { near: d.near }))[0];
+      if (!found && ccs.length > 1) found = (await searchPlaces(d.areaText, ccs, controller.signal))[0];
       if (!found) {
+        const where = destinationText(ccs.map((c) => getCountry(c)?.name).filter(Boolean));
         throw Object.assign(new Error("no area"), {
-          userText: `Couldn't find "${d.areaText}"${country ? ` in ${country.name}` : ""}. Try a neighbourhood, station or landmark.`,
+          userText: `Couldn't find "${d.areaText}"${where ? ` in ${where}` : ""}. Try a neighbourhood, station or landmark.`,
         });
       }
       d.area = areaFrom(found, d.areaText);
+      if (found.countryCode) d.country = found.countryCode;
     }
     const { results, cached, basic } = await discoverPlaces(
       { type: d.type, lat: d.area.lat, lon: d.area.lon, radius: d.radius, keyword: d.keyword }, controller.signal);
@@ -1354,19 +1536,20 @@ async function runDiscover(trip) {
 
 function discoverView(trip, days) {
   const d = discoverState(trip);
-  const country = getCountry(trip.country);
+  const ccs = tripCountries(trip);
+  const where = destinationText(ccs.map((c) => getCountry(c)?.name).filter(Boolean));
   const type = discoverType(d.type);
 
   const areaInput = h("input", {
     name: "area", required: true, value: d.areaText, autofocus: !d.areaText || null,
-    placeholder: country ? `A neighbourhood, station or landmark in ${country.name}` : "A neighbourhood, station or landmark",
+    placeholder: where ? `A neighbourhood, station or landmark in ${where}` : "A neighbourhood, station or landmark",
   });
   const areaBox = autocomplete(areaInput, {
     delay: 350,
-    search: (q, signal) => searchPlaces(q, country?.code, signal, { near: d.near }),
-    renderItem: settlementRow,
+    search: (q, signal) => searchPlaces(q, ccs, signal, { near: d.near }),
+    renderItem: ccs.length > 1 ? (p) => [...settlementRow(p), FLAGS_OK && p.countryCode && h("span", { class: "ac-tag" }, flag(p.countryCode))].filter(Boolean) : settlementRow,
     footer: osmFooter,
-    onPick: (p) => { areaInput.value = p.name; d.areaText = p.name; d.area = areaFrom(p, p.name); d.stop = null; },
+    onPick: (p) => { areaInput.value = p.name; d.areaText = p.name; d.area = areaFrom(p, p.name); d.stop = null; if (p.countryCode) d.country = p.countryCode; },
   });
   const keywordInput = h("input", { name: "keyword", value: d.keyword, placeholder: type.placeholder, maxlength: 40 });
   const radiusSelect = h("select", { name: "radius" }, RADII.map((r) => h("option", { value: r, selected: r === d.radius }, formatDistance(r))));
@@ -1407,7 +1590,7 @@ function discoverView(trip, days) {
       stops.map((st) => h("button", { class: `chip small${d.stop === st.full && d.areaText === st.text ? " active" : ""}`, type: "button",
         title: st.dates.length ? `Search around ${st.full}, and add finds to ${st.label} by default` : `Search around ${st.full}`,
         onclick: () => { useStop(d, st); areaInput.value = st.text; search(); } },
-        st.label && h("span", { class: "muted" }, `${st.label} · `), st.full))),
+        st.label && h("span", { class: "muted" }, `${st.label} · `), ccs.length > 1 && FLAGS_OK && st.country ? `${flag(st.country)} ` : "", st.full))),
     stops.every((st) => !st.dates.length) && days.length > 0 && h("p", { class: "small muted" },
       "Tip: pick where you'll be each day on the Itinerary (the 📍 next to each day) and Discover will start there."));
   form.addEventListener("submit", (e) => { e.preventDefault(); search(); });
@@ -1454,7 +1637,7 @@ function discoverResults(trip, days, d) {
         const current = loadTrips().find((t) => t.id === trip.id);
         if (!current) return;
         const item = { ...emptyItem(date), time, title: r.name, location: d.area.label, category: type.category, link: resultLink(r, d, trip), place: resultPlace(r, d) };
-        saveTrip({ ...current, items: [...current.items, item] });
+        saveTrip({ ...current, items: [...current.items, withCurrency(item, planCurrency(current, d.country), current)] });
         d.scheduling = null;
       }, () => { d.scheduling = null; }),
       !WIDE.matches && selected?.osm === r.osm && h("div", { class: "info-inline" }, infoPanel(discoverAsItem(r, trip), trip, days))))),
@@ -1617,29 +1800,50 @@ function attachPanel(item, trip) {
   return panel;
 }
 
-// A cost input with a live "≈ S$12.30" under it while typing.
+// A cost input with a live "≈ S$12.30" under it while typing. `currency()` is read each time, as it can change.
 function costField(label, input, currency) {
   const hint = h("span", { class: "alt num cost-hint", "aria-live": "polite" });
+  const labelEl = h("span", null);
   const update = () => {
     const n = Number(input.value);
-    hint.textContent = input.value.trim() !== "" && n > 0 ? homeText(n, currency) : "";
+    labelEl.textContent = `${label} (${currency()})`;
+    hint.textContent = input.value.trim() !== "" && n > 0 ? homeText(n, currency()) : "";
   };
   input.addEventListener("input", update);
   update();
-  return h("label", { class: "field span-2" }, h("span", null, label), input, hint);
+  const el = h("label", { class: "field span-2" }, labelEl, input, hint);
+  return { el, update };
 }
 
 function itemForm(item, trip, days, onSave, onCancel, onDelete) {
-  const country = getCountry(trip.country);
+  const ccs = tripCountries(trip);
+  const multi = ccs.length > 1;
+  let country = getCountry(itemCountry(item, trip, days));
   const titleInput = h("input", { name: "title", required: true, autofocus: true, value: item.title });
-  // Suggestions favour places around where you are that day.
+
+  // The cost's currency: the plan's own, or for a new plan on a multi-country trip, the day's country's.
+  const isNew = !trip.items.some((i) => i.id === item.id);
+  const startCur = isNew && !item.currency ? planCurrency(trip, country?.code) : itemCurrency(item, trip);
+  const curOptions = [...new Set([startCur, trip.currency, ...ccs.map(currencyForCountry), home.currency, ...ALL_CURRENCIES].filter(Boolean))];
+  const currencySelect = h("select", { name: "currency", "aria-label": "Currency" }, curOptions.map((c) => h("option", { selected: c === startCur }, c)));
+  let currencyTouched = !isNew || Boolean(item.currency);
+  const setCur = (code) => {
+    if (currencyTouched || !code || code === currencySelect.value) return;
+    currencySelect.value = code;
+    estField.update(); actField.update();
+  };
+
+  // Suggestions favour places around where you are that day, in that day's country.
   let near = null;
   const setDay = (date) => {
     const b = days.includes(date) ? dayBase(trip, date, days) : null;
     near = basePoint(trip, b);
+    if (multi) {
+      country = getCountry(dayCountry(trip, date, days));
+      setCur(planCurrency(trip, country?.code));
+    }
     titleInput.placeholder = b ? `Try a place near ${b.area || b.city}` : country ? `Try "Disney" or a place in ${country.name}` : "Sunset at Uluwatu";
   };
-  setDay(item.date);
   const categorySelect = h("select", { name: "category" }, CATEGORIES.map((c) => h("option", { selected: c === item.category }, c)));
   const locationInput = h("input", { name: "location", placeholder: "Address or area", value: item.location });
   const linkInput = h("input", { name: "link", type: "url", placeholder: "https://", value: item.link });
@@ -1652,23 +1856,25 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   // Typing a place suggests real ones in the trip's country, and fills in the rest of the form.
   const placeBox = autocomplete(titleInput, {
     delay: 350,
-    search: (q, signal) => searchPlaces(q, country?.code, signal, { near }),
+    // A multi-country trip searches the day's country first, then the others.
+    search: (q, signal) => searchPlaces(q, multi ? [country?.code, ...ccs] : country?.code, signal, { near }),
     renderItem: (p) => [
       h("span", { class: "ac-icon", "aria-hidden": "true" }, "📍"),
       h("span", { class: "ac-main" },
         h("span", { class: "ac-title" }, p.name),
-        h("span", { class: "ac-sub small muted" }, [p.area, !country && p.country].filter(Boolean).join(", "))),
+        h("span", { class: "ac-sub small muted" }, [p.area, (!country || multi) && p.country].filter(Boolean).join(", "))),
       p.kind && h("span", { class: "ac-tag" }, p.kind),
     ].filter(Boolean),
     footer: () => h("span", { class: "small muted" }, "Places from © OpenStreetMap contributors"),
     onPick: (p) => {
       titleInput.value = p.name;
       if (!locationInput.value.trim() || locationInput.value === autoLocation) {
-        locationInput.value = autoLocation = [p.area, !country && p.country].filter(Boolean).join(", ");
+        locationInput.value = autoLocation = [p.area, (!country || multi) && p.country].filter(Boolean).join(", ");
       }
       if (!linkInput.value.trim() || linkInput.value === autoLink) linkInput.value = autoLink = mapsLink(p);
       if (p.category && !categoryTouched) categorySelect.value = p.category;
-      picked = p.osm ? { osm: p.osm, lat: p.lat, lon: p.lon, kind: p.kind, area: p.area } : null;
+      picked = p.osm ? { osm: p.osm, lat: p.lat, lon: p.lon, kind: p.kind, area: p.area, ...(p.countryCode ? { cc: p.countryCode } : {}) } : null;
+      if (multi && p.countryCode) setCur(planCurrency(trip, p.countryCode));
       if (activeInfo?.isConnected) fillInfo(activeInfo, { ...item, title: p.name, category: categorySelect.value, place: picked }, trip, days);
     },
   });
@@ -1681,6 +1887,11 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
   paidBox.addEventListener("change", () => { paidTouched = true; });
   const hadActual = item.actualCost !== null && item.actualCost !== undefined;
   actualInput.addEventListener("input", () => { if (!paidTouched && !hadActual) paidBox.checked = actualInput.value.trim() !== ""; });
+  const curNow = () => currencySelect.value;
+  const estField = costField("Estimated cost", h("input", { name: "estimatedCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: item.estimatedCost || "" }), curNow);
+  const actField = costField("Actual cost", actualInput, curNow);
+  currencySelect.addEventListener("change", () => { currencyTouched = true; estField.update(); actField.update(); });
+  setDay(item.date);
   const form = h("form", { class: "card pad form-grid six editing" },
     field("What", placeBox.el, "span-4"),
     field("Category", categorySelect, "span-2"),
@@ -1691,9 +1902,10 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
       : h("input", { name: "date", type: "date", value: item.date }), "span-2"),
     field("Time", h("input", { name: "time", type: "time", value: item.time }), "span-1"),
     field("Where", locationInput, "span-3"),
-    costField(`Estimated cost (${trip.currency})`, h("input", { name: "estimatedCost", type: "number", min: 0, step: "0.01", inputmode: "decimal", placeholder: "0", value: item.estimatedCost || "" }), trip.currency),
-    costField(`Actual cost (${trip.currency})`, actualInput, trip.currency),
-    field("Link", linkInput, "span-2"),
+    estField.el,
+    actField.el,
+    field("Currency", currencySelect, "span-2"),
+    field("Link", linkInput, "span-all"),
     field("Notes", h("textarea", { name: "notes", rows: 2 }, item.notes), "span-all"),
     h("label", { class: "check span-all" }, paidBox, h("span", null, "Paid"), h("span", { class: "small muted" }, " · ticks it off the to-pay list on the right")),
     h("div", { class: "actions span-all" },
@@ -1707,7 +1919,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     const f = new FormData(form);
     const actualRaw = String(f.get("actualCost")).trim();
     const draft = {
-      ...item,
+      ...withCurrency(item, String(f.get("currency")), trip),
       category: String(f.get("category")),
       date: String(f.get("date") ?? ""),
       estimatedCost: Number(f.get("estimatedCost")) || 0,
@@ -1726,7 +1938,7 @@ function itemForm(item, trip, days, onSave, onCancel, onDelete) {
     const actualRaw = String(f.get("actualCost")).trim();
     const actual = actualRaw === "" ? null : Number(actualRaw);
     onSave({
-      ...item,
+      ...withCurrency(item, String(f.get("currency")), trip),
       title,
       place: picked ?? (title === item.title ? item.place : undefined),
       category: String(f.get("category")),
@@ -1776,7 +1988,7 @@ function fillInfo(box, item, trip, days) {
           : "Add a plan, then pick it in the itinerary to see opening hours, a short guide and crowd tips here.")));
     return;
   }
-  const country = getCountry(trip.country);
+  const country = getCountry(itemCountry(item, trip, days));
   const infoP = track(getPlaceInfo({ title: item.title, place: item.place, countryCode: country?.code }));
   const year = /^\d{4}/.test(item.date) ? item.date.slice(0, 4) : null;
   const holP = track(getHolidays(country?.code, year));
@@ -1799,7 +2011,7 @@ function infoContent(item, trip, days, info, hol) {
   const section = (title, ...body) => h("section", { class: "info-sec" }, h("h3", null, title), ...body);
   const extLink = (href, text) => h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text);
   const maps = item.link?.startsWith("https://www.google.com/maps") ? item.link
-    : mapsLink({ name: data?.name || item.title, area: data?.area || item.location, country: getCountry(trip.country)?.name });
+    : mapsLink({ name: data?.name || item.title, area: data?.area || item.location, country: getCountry(itemCountry(item, trip, days))?.name });
 
   const note = hol ? dayNote(item.date, hol.value ?? null) : null;
   const tip = crowdTip(kind, item.category);
@@ -1895,17 +2107,19 @@ function budgetView(trip, days) {
     h("div", { class: "card table-wrap" },
       h("table", { class: "budget" },
         h("thead", null, h("tr", null,
-          h("th", null, "Category"), h("th", null, "Budget limit"), h("th", { class: "r" }, "Estimated"),
+          h("th", null, "Category"), h("th", null, `Budget limit (${trip.currency})`), h("th", { class: "r" }, "Estimated"),
           h("th", { class: "r" }, "Paid"), h("th", { class: "r" }, "Expected"), h("th", null, h("span", { class: "sr-only" }, "Progress")))),
         h("tbody", null, rows),
         h("tfoot", null, h("tr", null,
           h("td", null, "Total"), refs.foot.budget, refs.foot.planned, refs.foot.spent, refs.foot.projected, h("td", null))))),
-    h("p", { class: "small muted" }, "Expected uses what you actually paid where you've entered it, and the estimate for everything else."),
+    h("p", { class: "small muted" }, "Expected uses what you actually paid where you've entered it, and the estimate for everything else.",
+      tripCurrencyList(trip).length > 1 ? ` Plans in other currencies are converted to ${trip.currency} at today's rate.` : ""),
+    refs.madeOf = h("div"),
     rateNote(trip),
     days.length > 0 && h("section", null,
       h("h3", null, "By day"),
       (() => {
-        const s = summarizeBudget(current, days.length);
+        const s = summarize(current, days.length);
         const maxDay = Math.max(1, ...days.map((d) => s.byDay[d] ?? 0));
         return h("div", { class: "card pad day-bars" }, days.map((d, i) => {
           const v = s.byDay[d] ?? 0;
@@ -1924,7 +2138,7 @@ function budgetView(trip, days) {
   }
 
   function update() {
-    const s = summarizeBudget(current, days.length);
+    const s = summarize(current, days.length);
     const hasBudget = s.totalBudget > 0;
     const over = hasBudget && s.remaining < 0;
     setStat("budget", "Budget", hasBudget ? money(s.totalBudget) : "Not set", "", s.totalBudget);
@@ -1951,6 +2165,7 @@ function budgetView(trip, days) {
     refs.foot.planned.textContent = money(s.totalPlanned);
     refs.foot.spent.textContent = money(s.totalSpent);
     refs.foot.projected.replaceChildren(money(s.totalProjected), alt(s.totalProjected, current.currency) ?? "");
+    refs.madeOf.replaceChildren(...[madeUpOf(s, current), unconvertedNote(s, current)].filter(Boolean));
   }
 
   update();

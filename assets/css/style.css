@@ -522,3 +522,11 @@ table.budget { width: 100%; min-width: 560px; border-collapse: collapse; font-si
 .guide-more { font-size: 0.9rem; border-top: 1px solid var(--line); padding-top: 8px; }
 .guide-more summary { cursor: pointer; font-weight: 550; }
 .guide-more > *:not(summary) { margin-top: 8px; }
+
+/* Multi-country trips */
+.country-tags[hidden] { display: none; }
+.city-group { display: grid; gap: 8px; }
+.city-group.multi { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.city-group-head { margin: 0; }
+.guide-countries { display: flex; flex-wrap: wrap; gap: 6px; }
+.made-of { margin: 2px 0 0; }
